@@ -649,7 +649,7 @@
           return {
             ...defaultAutocompleteConfig,
             title: config.title,
-            source: candidateSourceFactory(columnCandidateData),
+            source: candidateSourceFactory(columnCandidateData, { sortByLength: config.sortByLength === true }),
             renderer: createCandidateAwareRenderer(candidateLookup, { allowAppendix: config.title === 'Lesions' }),
             proportion: config.proportion || 1,
             ...config.overrides
@@ -664,9 +664,9 @@
     // 原始欄位設定，只需指定 src（例如 "radioactivities.js"）或直接指定 type
     const rawColumnConfigs = [
       { title: 'Radioactivities', src: 'radioactivities.js', proportion: 1 },
-      { title: 'Lesions',         src: 'lesions.js',         proportion: 1 },
+      { title: 'Lesions',         src: 'lesions.js',         proportion: 1, sortByLength: true },
       { title: 'Changes',         src: 'changes.js',         proportion: 1 },
-      { title: 'Impressions',     src: 'impressions.js',     proportion: 3 },
+      { title: 'Impressions',     src: 'impressions.js',     proportion: 3, sortByLength: true },
       { title: 'Note',            type: 'text',             proportion: 1.5 },
       { title: 'S',               type: 'text',             proportion: 0.2 },
       { title: 'I',               type: 'text',             proportion: 0.2 },

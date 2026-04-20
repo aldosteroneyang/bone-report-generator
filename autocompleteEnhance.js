@@ -6,6 +6,7 @@
   const searchCache = {
     lastQuery: '',
     lastCandidates: [],
+    lastSortByLength: false,
     results: []
   };
 
@@ -30,8 +31,24 @@
     });
   }
 
+  function normalizedCandidateLength(candidate) {
+    return String(candidate || '').replace(/\s+/g, ' ').trim().length;
+  }
+
+  function sortCandidatesByLength(candidateArray) {
+    return candidateArray
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => {
+        const lengthDiff = normalizedCandidateLength(a.item) - normalizedCandidateLength(b.item);
+        return lengthDiff !== 0 ? lengthDiff : a.index - b.index;
+      })
+      .map(({ item }) => item);
+  }
+
   // 2. 改良後的候選項來源 Factory：加入緩存機制，支持對象和數組
-  function candidateSourceFactory(candidates) {
+  function candidateSourceFactory(candidates, options = {}) {
+    const sortByLength = options.sortByLength === true;
+
     return function(query, process) {
       // 存儲查詢，但使用閉包而非全局變數
       const currentQuery = query || "";
@@ -48,7 +65,8 @@
       
       // 檢查緩存
       if (searchCache.lastQuery === currentQuery && 
-          searchCache.lastCandidates === candidates) {
+          searchCache.lastCandidates === candidates &&
+          searchCache.lastSortByLength === sortByLength) {
         process(searchCache.results);
         return;
       }
@@ -57,6 +75,7 @@
       if (!currentQuery) {
         searchCache.lastQuery = '';
         searchCache.lastCandidates = candidates;
+        searchCache.lastSortByLength = sortByLength;
         searchCache.results = candidateArray;
         process(candidateArray);
         return;
@@ -64,13 +83,15 @@
       
       // 過濾候選項
       const filtered = candidateArray.filter(item => customFuzzySearch(currentQuery, item));
+      const results = sortByLength ? sortCandidatesByLength(filtered) : filtered;
       
       // 更新緩存
       searchCache.lastQuery = currentQuery;
       searchCache.lastCandidates = candidates;
-      searchCache.results = filtered;
+      searchCache.lastSortByLength = sortByLength;
+      searchCache.results = results;
       
-      process(filtered);
+      process(results);
     };
   }
 
@@ -185,6 +206,7 @@
   function clearCaches() {
     searchCache.lastQuery = '';
     searchCache.lastCandidates = [];
+    searchCache.lastSortByLength = false;
     searchCache.results = [];
     Object.keys(regexCache).forEach(key => delete regexCache[key]);
   }
