@@ -11,7 +11,22 @@ This app follows the same browser-window contract as `mpi-report-generator`:
 3. The user clicks `Send report data`.
 4. The app sends a structured payload to `window.opener.postMessage`.
 
-Payload fields:
+Canonical payload:
+
+```js
+{
+  type: "GUI_REPORT_RESULT",
+  areas: {
+    Procedure: { value: "...Tc-99m MDP..." },
+    Findings: { value: "..." },
+    Impression: { value: "..." },
+    Keyword: { value: "left ilium → S: 5 I: 48" }
+  },
+  generatorState: {}
+}
+```
+
+Legacy top-level fields are still included temporarily:
 
 ```js
 {
@@ -33,7 +48,9 @@ WEBNM mapping for MCIID `9310401`:
 }
 ```
 
-`area_128` Clinical History is intentionally not overwritten.
+`area_128` Clinical History is read-only context and is intentionally not overwritten.
+
+When opened by `gui-report-extension`, draft state is scoped by `referno` and cached for 5 days through extension-owned `chrome.storage.local`. Standalone localStorage fallback is also scoped instead of using a shared `tableData` key.
 
 ## Local Use
 

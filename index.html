@@ -689,6 +689,54 @@
       RULE_BASED: 'rule-based'
     };
     const DEFAULT_ROW_COUNT = 30;
+    function decodeTransferData(encodedData) {
+      try {
+        return decodeURIComponent(escape(atob(encodedData)));
+      } catch (error) {
+        return atob(encodedData);
+      }
+    }
+
+    function readExtensionData() {
+      const encodedData = new URLSearchParams(window.location.search).get('data');
+      if (!encodedData) return null;
+
+      try {
+        const data = JSON.parse(decodeTransferData(encodedData));
+        return data && data.type === 'GUI_EXTENSION_DATA' ? data : null;
+      } catch (error) {
+        console.warn('無法解析 extension data:', error);
+        return null;
+      }
+    }
+
+    const guiExtensionData = readExtensionData();
+    window.guiExtensionData = guiExtensionData;
+    window.clinicalHistoryContext = getAreaValue(guiExtensionData, 'ClinicalHistory');
+
+    function getAreaValue(data, key) {
+      const areaValue = data?.areas?.[key];
+      if (areaValue && typeof areaValue === 'object' && Object.prototype.hasOwnProperty.call(areaValue, 'value')) {
+        return areaValue.value || '';
+      }
+      if (typeof areaValue === 'string') {
+        return areaValue;
+      }
+      return data?.textValues?.[key] || '';
+    }
+
+    function getExtensionReferno() {
+      return String(guiExtensionData?.patientInfo?.referno || '').trim();
+    }
+
+    function getScopedStorageKey(key) {
+      const referno = getExtensionReferno();
+      return referno ? `boneReportGenerator:${referno}:${key}` : `boneReportGenerator:standalone:${key}`;
+    }
+
+    function getCachedGeneratorState() {
+      return guiExtensionData?.cache?.generatorState || {};
+    }
     
     // 取得欄位標題
     const colHeaders = myColumns.map(col => col.title);
@@ -736,7 +784,12 @@
     // 嘗試從本地儲存載入資料
     function getInitialData() {
       try {
-        const savedData = localStorage.getItem('tableData');
+        const cachedTableData = getCachedGeneratorState().tableData;
+        if (Array.isArray(cachedTableData)) {
+          return cachedTableData;
+        }
+
+        const savedData = localStorage.getItem(getScopedStorageKey('tableData'));
         if (savedData) {
           return JSON.parse(savedData);
         }
@@ -751,7 +804,8 @@
     function saveData() {
       try {
         const data = hot.getData();
-        localStorage.setItem('tableData', JSON.stringify(data));
+        localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(data));
+        postDraftToOpener();
         showNotification('資料已儲存');
       } catch (e) {
         console.error('儲存資料失敗', e);
@@ -762,10 +816,11 @@
     // 載入已儲存資料
     function loadData() {
       try {
-        const savedData = localStorage.getItem('tableData');
+        const savedData = localStorage.getItem(getScopedStorageKey('tableData'));
         if (savedData) {
           hot.loadData(JSON.parse(savedData));
           refreshReport({ silent: true });
+          scheduleDraftSave();
           showNotification('資料已載入');
         } else {
           showNotification('沒有已儲存的資料', true);
@@ -780,8 +835,9 @@
     function clearData() {
       if (confirm('確定要清除所有資料嗎？此操作無法復原！')) {
         hot.loadData(Array.from({ length: DEFAULT_ROW_COUNT }, () => Array(myColumns.length).fill('')));
-        localStorage.removeItem('tableData');
+        localStorage.removeItem(getScopedStorageKey('tableData'));
         refreshReport({ silent: true });
+        scheduleDraftSave();
         showNotification('所有資料已清除');
       }
     }
@@ -1065,10 +1121,11 @@
       if (autofillUpdates.length > 0) {
         hot.setDataAtCell(autofillUpdates, AUTOFILL_DEFAULT_RADIOACTIVITY_SOURCE);
       }
-      localStorage.setItem('tableData', JSON.stringify(hot.getData()));
+      localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(hot.getData()));
 
       document.getElementById('examDate').value = normalized.examDate || '';
       saveDate(false);
+      scheduleDraftSave();
       return normalized;
     }
 
@@ -1408,6 +1465,46 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
         .join('\n');
     }
 
+    function getGeneratorState() {
+      return {
+        tableData: hot ? hot.getData() : [],
+        examDate: document.getElementById('examDate')?.value?.trim() || '',
+        updatedAt: new Date().toISOString()
+      };
+    }
+
+    function buildReportAreas(report, tableData) {
+      return {
+        Procedure: { value: BONE_SCAN_PROCEDURE },
+        Findings: { value: report.textFindings || '' },
+        Impression: { value: report.textImpressions || '' },
+        Keyword: { value: generateKeyword(tableData) }
+      };
+    }
+
+    let draftSaveTimer = null;
+    function postDraftToOpener() {
+      if (!window.opener || !hot) return;
+
+      try {
+        const examDate = document.getElementById('examDate').value.trim();
+        const tableData = hot.getData();
+        const report = window.reportGenerator.getReport(tableData, examDate);
+        window.opener.postMessage({
+          type: 'GUI_REPORT_DRAFT',
+          areas: buildReportAreas(report, tableData),
+          generatorState: getGeneratorState()
+        }, '*');
+      } catch (error) {
+        console.warn('Draft cache 更新失敗:', error);
+      }
+    }
+
+    function scheduleDraftSave() {
+      window.clearTimeout(draftSaveTimer);
+      draftSaveTimer = window.setTimeout(postDraftToOpener, 800);
+    }
+
     // 初始化 Handsontable
     const hot = new Handsontable(container, {
       data: getInitialData(),
@@ -1458,8 +1555,9 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
           // 只有用戶編輯時才自動儲存，但不顯示通知
           try {
             const data = hot.getData();
-            localStorage.setItem('tableData', JSON.stringify(data));
+            localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(data));
             scheduleRefreshReport();
+            scheduleDraftSave();
             // 編輯時不顯示通知，避免干擾
           } catch (e) {
             console.error('自動儲存失敗', e);
@@ -1484,16 +1582,19 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       const dateInput = document.getElementById('examDate');
       const date = dateInput.value;
       if (date && date.trim() !== "") {
-        localStorage.setItem('savedDate', date.trim());
+        localStorage.setItem(getScopedStorageKey('savedDate'), date.trim());
         if (showMsg) showNotification('日期已儲存');
       } else {
-        localStorage.removeItem('savedDate');
+        localStorage.removeItem(getScopedStorageKey('savedDate'));
         if (showMsg) showNotification('日期已清除');
       }
+      scheduleDraftSave();
     }
 
     function getSavedDate() {
-      return localStorage.getItem('savedDate') || "";
+      const cachedDate = getCachedGeneratorState().examDate;
+      if (cachedDate) return cachedDate;
+      return localStorage.getItem(getScopedStorageKey('savedDate')) || "";
     }
 
     function loadSavedDate() {
@@ -1515,8 +1616,9 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       ];
       
       hot.loadData(testData.slice(1)); // 跳過標題行
-      localStorage.setItem('tableData', JSON.stringify(testData.slice(1)));
+      localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(testData.slice(1)));
       refreshReport({ silent: true });
+      scheduleDraftSave();
       showNotification('測試資料已載入');
     }
 
@@ -1608,18 +1710,15 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
 
       try {
         const report = window.reportGenerator.getReport(tableData, examDate);
+        const areas = buildReportAreas(report, tableData);
         const reportData = {
           type: 'GUI_REPORT_RESULT',
-          areas: {
-            Procedure: BONE_SCAN_PROCEDURE,
-            Findings: report.textFindings || '',
-            Impression: report.textImpressions || '',
-            Keyword: generateKeyword(tableData)
-          },
+          areas,
+          generatorState: getGeneratorState(),
           Procedure: BONE_SCAN_PROCEDURE,
-          Findings: report.textFindings || '',
-          Impression: report.textImpressions || '',
-          Keyword: generateKeyword(tableData)
+          Findings: areas.Findings.value,
+          Impression: areas.Impression.value,
+          Keyword: areas.Keyword.value
         };
 
         document.getElementById('textFindings').value = reportData.Findings;
@@ -1647,6 +1746,9 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
     loadSavedApiKey();
     setParserMode(PARSER_MODE.API);
     refreshReport({ silent: true });
+    if (guiExtensionData?.cache) {
+      showNotification('已載入此 referno 的 5 天內快取');
+    }
 
     // 綁定按鈕事件
     document.getElementById('saveBtn').addEventListener('click', saveData);
