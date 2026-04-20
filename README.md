@@ -20,7 +20,7 @@ Canonical payload:
     Procedure: { value: "...Tc-99m MDP..." },
     Findings: { value: "..." },
     Impression: { value: "..." },
-    Keyword: { value: "left ilium → S: 5 I: 48" }
+    Keyword: { value: "left ilium → N: follow-up S: 5 I: 48 X: 120 Y: 220\n# → N: general note" }
   },
   generatorState: {}
 }
@@ -33,7 +33,7 @@ Legacy top-level fields are still included temporarily:
   Procedure: "...Tc-99m MDP...",
   Findings: "...",
   Impression: "...",
-  Keyword: "left ilium → S: 5 I: 48"
+  Keyword: "left ilium → N: follow-up S: 5 I: 48 X: 120 Y: 220\n# → N: general note"
 }
 ```
 

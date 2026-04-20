@@ -681,7 +681,9 @@
       LESIONS: 1,
       NOTE: 4,
       S: 5,
-      I: 6
+      I: 6,
+      X: 7,
+      Y: 8
     };
     const BONE_SCAN_PROCEDURE = 'A bone scan consisting of whole body and/or spot views is obtained by gamma camera with low energy high resolution collimator 3 hours after the intravenous injection of 20 mCi of Tc-99m MDP.';
     const PARSER_MODE = {
@@ -1452,14 +1454,21 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       return (tableData || [])
         .map(row => {
           const lesion = normalizeLesionValue(row?.[COLUMN_INDEX.LESIONS]);
+          const noteValue = String(row?.[COLUMN_INDEX.NOTE] || '').trim();
           const sValue = String(row?.[COLUMN_INDEX.S] || '').trim();
           const iValue = String(row?.[COLUMN_INDEX.I] || '').trim();
-          const scores = [
+          const xValue = String(row?.[COLUMN_INDEX.X] || '').trim();
+          const yValue = String(row?.[COLUMN_INDEX.Y] || '').trim();
+          const keywordValues = [
+            noteValue ? `N: ${noteValue}` : '',
             sValue ? `S: ${sValue}` : '',
-            iValue ? `I: ${iValue}` : ''
+            iValue ? `I: ${iValue}` : '',
+            xValue ? `X: ${xValue}` : '',
+            yValue ? `Y: ${yValue}` : ''
           ].filter(Boolean).join(' ');
+          const lesionLabel = lesion || (noteValue ? '#' : '');
 
-          return lesion && scores ? `${lesion} → ${scores}` : '';
+          return lesionLabel && keywordValues ? `${lesionLabel} → ${keywordValues}` : '';
         })
         .filter(Boolean)
         .join('\n');
