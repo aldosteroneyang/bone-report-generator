@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "generator": {
+    "id": "bone-report-generator",
+    "name": "Bone Report Generator",
+    "webappUrl": "https://bone-report-generator.vercel.app/"
+  },
+  "reports": [
+    {
+      "mciid": "9310401",
+      "name": "Whole Body Bone Scan",
+      "areas": [
+        {
+          "key": "ClinicalHistory",
+          "label": "Clinical History",
+          "webnmId": "area_128",
+          "read": true,
+          "write": false
+        },
+        {
+          "key": "Procedure",
+          "label": "Procedure",
+          "webnmId": "area_129",
+          "read": true,
+          "write": true
+        },
+        {
+          "key": "Findings",
+          "label": "Findings",
+          "webnmId": "area_130",
+          "read": true,
+          "write": true
+        },
+        {
+          "key": "Impression",
+          "label": "Impression",
+          "webnmId": "area_131",
+          "read": true,
+          "write": true
+        },
+        {
+          "key": "Keyword",
+          "label": "Keyword",
+          "webnmId": "keyword",
+          "read": true,
+          "write": true
+        }
+      ]
+    }
+  ]
+}

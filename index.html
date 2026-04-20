@@ -1609,6 +1609,13 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       try {
         const report = window.reportGenerator.getReport(tableData, examDate);
         const reportData = {
+          type: 'GUI_REPORT_RESULT',
+          areas: {
+            Procedure: BONE_SCAN_PROCEDURE,
+            Findings: report.textFindings || '',
+            Impression: report.textImpressions || '',
+            Keyword: generateKeyword(tableData)
+          },
           Procedure: BONE_SCAN_PROCEDURE,
           Findings: report.textFindings || '',
           Impression: report.textImpressions || '',
