@@ -12,3 +12,4 @@ build/
 
 # Local reference data containing patient identifiers
 for_reference_only/reports.csv
+.vercel
