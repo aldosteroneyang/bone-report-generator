@@ -1,0 +1,1665 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>骨骼掃描 GUI</title>
+  <!-- 引入 Handsontable CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable/dist/handsontable.full.min.css">
+  <!-- 引入 Handsontable JS -->
+  <script src="https://cdn.jsdelivr.net/npm/handsontable/dist/handsontable.full.min.js"></script>
+  
+  <!-- 載入候選資料檔案 (這些檔案需定義全域變數，如 window.radioactivitiesCandidates) -->
+  <script src="radioactivities.js"></script>
+  <script src="lesions.js"></script>
+  <script src="appendices.js"></script>
+  <script src="lesionCanonicalizer.js"></script>
+  <script src="changes.js"></script>
+  <script src="impressions.js"></script>
+  
+  <!-- 載入封裝 fuzzy search、highlight 與 dropdown 強化功能的外部 JS -->
+  <script src="autocompleteEnhance.js"></script>
+  
+  <!-- 載入報告生成器 -->
+  <script src="reportGenerator.js"></script>
+
+  <style>
+    :root {
+      --bg: #f6f7f8;
+      --panel: #ffffff;
+      --panel-muted: #fbfbfb;
+      --border: #e5e7eb;
+      --border-strong: #d1d5db;
+      --text: #111827;
+      --text-muted: #6b7280;
+      --accent: #1f2937;
+      --accent-soft: #eef2f7;
+      --danger: #ef4444;
+      --success: #111827;
+      --radius: 8px;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+      --font-mono: "SFMono-Regular", "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    body {
+      font-family: var(--font-sans);
+      padding: 12px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .workspace-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+    .topbar {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, max-content) minmax(0, max-content) 1fr minmax(0, max-content);
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+    .toolbar-group {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .toolbar-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      white-space: nowrap;
+      letter-spacing: 0.01em;
+    }
+    .toolbar-spacer {
+      flex: 1 1 auto;
+    }
+    .compact-input {
+      height: 32px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-sizing: border-box;
+      background: var(--panel);
+      color: var(--text);
+      font: 500 12px/1 var(--font-sans);
+      outline: none;
+      box-shadow: none;
+    }
+    .compact-input:focus,
+    .previous-report-bar textarea:focus,
+    .report-item textarea:focus {
+      border-color: var(--border-strong);
+    }
+    .date-input {
+      width: 150px;
+    }
+    .api-input {
+      width: 150px;
+    }
+    .action-group {
+      justify-content: flex-end;
+    }
+    .previous-report-bar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 168px;
+      gap: 8px;
+      align-items: stretch;
+      min-width: 0;
+    }
+    .previous-report-bar textarea {
+      min-height: 68px;
+      max-height: 88px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      resize: vertical;
+      box-sizing: border-box;
+      background: var(--panel);
+      color: var(--text);
+    }
+    .previous-report-actions {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .parser-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+    }
+    .parser-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-muted);
+      width: fit-content;
+      max-width: 100%;
+    }
+    .parser-tab {
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font: 600 11px/1 var(--font-sans);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .parser-tab.active {
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: var(--shadow);
+    }
+    .parser-status {
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .helper-text {
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .main-container {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+      gap: 12px;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .table-container {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    #hot {
+      width: 100%;
+      height: 100%;
+      min-height: 420px;
+      overflow: auto;
+    }
+    .highlight {
+      background-color: #e5e7eb;
+    }
+    .myCustomDropdown td {
+      white-space: normal !important;
+      word-wrap: break-word !important;
+      overflow-wrap: break-word !important;
+      max-width: 600px;
+    }
+    .handsontable td.candidate-warning-cell {
+      color: var(--danger) !important;
+      box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.25);
+      background: #fff;
+    }
+    .handsontable td.candidate-warning-cell.current,
+    .handsontable td.candidate-warning-cell.area,
+    .handsontable td.candidate-warning-cell.highlight {
+      color: var(--danger) !important;
+    }
+    .btn {
+      height: 32px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+      font-family: var(--font-sans);
+      font-weight: 500;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .btn:hover {
+      background: var(--accent-soft);
+      border-color: var(--border-strong);
+    }
+    .btn-warning {
+      color: var(--danger);
+      border-color: rgba(239, 68, 68, 0.25);
+      background: #fff;
+    }
+    .btn-warning:hover {
+      background: #fef2f2;
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: #374151;
+      border-color: #374151;
+      color: #fff;
+    }
+    .btn-subtle {
+      background: var(--panel-muted);
+    }
+    #notification {
+      position: fixed;
+      bottom: 12px;
+      right: 12px;
+      padding: 8px 14px;
+      background-color: var(--accent);
+      color: white;
+      border-radius: var(--radius);
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      z-index: 1000;
+      box-shadow: var(--shadow);
+    }
+    #notification.show {
+      opacity: 1;
+    }
+    #notification.error {
+      background-color: var(--danger);
+    }
+    .report-container {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      box-shadow: var(--shadow);
+    }
+    #reportSection {
+      padding: 0;
+      height: 100%;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0;
+    }
+    .report-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 0;
+    }
+    .report-item h4 {
+      margin: 0;
+      color: var(--text);
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .report-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .report-item textarea {
+      width: 100%;
+      min-height: 0;
+      flex: 1 1 auto;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      resize: vertical;
+      background: var(--panel-muted);
+      box-sizing: border-box;
+      line-height: 1.5;
+      color: var(--text);
+    }
+    .copy-btn {
+      height: 28px;
+      padding: 0 8px;
+      background: var(--panel);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    .copy-btn:hover {
+      background: var(--accent-soft);
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+    .copy-btn.copied {
+      background: #eef2f7;
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+    #textFindings {
+      min-height: 230px;
+    }
+    #textFindingsSeparated,
+    #textImpressions {
+      min-height: 170px;
+    }
+    .handsontable,
+    .handsontable .htCore,
+    .handsontable td,
+    .handsontable th {
+      font-family: var(--font-sans) !important;
+      font-size: 12px !important;
+    }
+    .handsontable .htCore td,
+    .handsontable .htCore th,
+    .handsontable td,
+    .handsontable th {
+      background: #fff !important;
+      color: var(--text) !important;
+      border-color: #eef0f2 !important;
+    }
+    .handsontable th,
+    .handsontable .ht_clone_top th,
+    .handsontable .ht_clone_left th {
+      background: #f8fafc !important;
+      color: var(--text-muted) !important;
+      font-weight: 600 !important;
+    }
+    .handsontable .currentRow,
+    .handsontable .currentCol,
+    .handsontable .area {
+      background: #f8fafc !important;
+    }
+    .handsontable .ht_master .wtHolder,
+    .handsontable .wtHolder {
+      background: #fff !important;
+    }
+    .handsontable .wtBorder {
+      background-color: #cbd5e1 !important;
+    }
+    .handsontable .htDimmed {
+      color: #374151 !important;
+    }
+    @media (max-width: 1380px) {
+      .toolbar {
+        grid-template-columns: minmax(0, max-content) minmax(0, max-content) 1fr;
+      }
+      .action-group {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+      }
+    }
+    @media (max-width: 1100px) {
+      .main-container {
+        grid-template-columns: 1fr;
+      }
+      .toolbar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+      }
+      .toolbar-group {
+        justify-content: flex-start;
+      }
+      #hot {
+        min-height: 320px;
+      }
+      .previous-report-bar {
+        grid-template-columns: 1fr;
+      }
+      .previous-report-actions {
+        align-items: flex-start;
+      }
+    }
+    @media (max-width: 760px) {
+      body {
+        padding: 10px;
+      }
+      .toolbar-group,
+      .action-group {
+        gap: 5px;
+      }
+      .compact-input,
+      .btn {
+        width: 100%;
+      }
+      .date-input,
+      .api-input {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="workspace-shell">
+    <div class="topbar">
+      <div class="toolbar">
+        <div class="toolbar-group">
+          <span class="toolbar-label">前次日期</span>
+          <input type="date" id="examDate" class="compact-input date-input" />
+          <button id="generateReportBtn" class="btn btn-primary">生成</button>
+          <button id="sendReportDataBtn" class="btn btn-primary">Send report data</button>
+        </div>
+        <div class="toolbar-group">
+          <span class="toolbar-label">API Key</span>
+          <input type="password" id="openaiApiKey" class="compact-input api-input" placeholder="OpenAI API key" />
+          <button id="saveApiKeyBtn" class="btn">儲存</button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <div class="toolbar-group action-group">
+          <button id="saveBtn" class="btn">儲存</button>
+          <button id="loadBtn" class="btn">載入</button>
+          <button id="exportBtn" class="btn">CSV</button>
+          <button id="loadTestDataBtn" class="btn btn-subtle">測試</button>
+          <button id="clearBtn" class="btn btn-warning">清除</button>
+        </div>
+      </div>
+
+      <div class="previous-report-bar">
+        <textarea id="previousReportInput" placeholder="貼上先前報告全文。系統會優先使用 API 解析，失敗時自動改用 rule-based 備援。"></textarea>
+        <div class="previous-report-actions">
+          <div class="parser-controls">
+            <div class="parser-tabs" role="tablist" aria-label="解析模式">
+              <button type="button" id="parserTabApi" class="parser-tab active" data-mode="api">API</button>
+              <button type="button" id="parserTabRuleBased" class="parser-tab" data-mode="rule-based">Rule-based</button>
+            </div>
+            <div id="parserStatus" class="parser-status">目前模式：API</div>
+          </div>
+          <button id="loadPreviousReportBtn" class="btn btn-primary">解析載入</button>
+          <div id="parserHint" class="helper-text">API 優先，失敗時自動切換到 Rule-based。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-container">
+      <div class="table-container">
+        <div id="hot"></div>
+      </div>
+      
+      <div class="report-container">
+        <div id="reportSection" style="display: none;">
+          <div class="report-item">
+            <h4>
+              <span>Findings</span>
+              <div class="report-actions">
+                <button class="copy-btn" onclick="copyToClipboard('textFindings', this)">複製</button>
+              </div>
+            </h4>
+            <textarea id="textFindings" readonly></textarea>
+          </div>
+          <div class="report-item">
+            <h4>
+              <span>Findings Separated</span>
+              <div class="report-actions">
+                <button class="copy-btn" onclick="copyToClipboard('textFindingsSeparated', this)">複製</button>
+              </div>
+            </h4>
+            <textarea id="textFindingsSeparated" readonly></textarea>
+          </div>
+          <div class="report-item">
+            <h4>
+              <span>Impressions</span>
+              <div class="report-actions">
+                <button class="copy-btn" onclick="copyToClipboard('textImpressions', this)">複製</button>
+                <button class="copy-btn" onclick="copyNegativeImpression(this)">複製 Negative</button>
+              </div>
+            </h4>
+            <textarea id="textImpressions" readonly></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 通知元素 -->
+  <div id="notification"></div>
+
+  <script>
+    // 從 autocompleteEnhance.js 取得所需函式
+    const { candidateSourceFactory, plainTextRenderer, enhanceAutocompleteDropdown, clearCaches } = window.autocompleteEnhance;
+    
+    // 啟用 AutocompleteEditor 增強功能（包含 fuzzy search、highlight、換行）
+    enhanceAutocompleteDropdown();
+
+    function normalizeCandidateValue(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function isAppendixLesionValue(value) {
+      if (window.reportGenerator?.isAppendixLesionValue) {
+        return window.reportGenerator.isAppendixLesionValue(value);
+      }
+      const normalized = normalizeCandidateValue(value).toLowerCase();
+      const appendices = window.appendicesCandidates || [];
+      return /\bmay\s+indicate\b/i.test(normalized) ||
+        appendices.some(candidate => normalizeCandidateValue(candidate).toLowerCase() === normalized);
+    }
+
+    function getCandidateItems(candidates) {
+      if (Array.isArray(candidates)) {
+        return candidates;
+      }
+      if (candidates && typeof candidates === 'object') {
+        return Object.keys(candidates);
+      }
+      return [];
+    }
+
+    function createCandidateLookup(candidates) {
+      return new Set(getCandidateItems(candidates).map(normalizeCandidateValue));
+    }
+
+    function getColumnCandidateData(config, candidateData) {
+      if (config.title !== 'Lesions') {
+        return candidateData;
+      }
+      return [
+        ...getCandidateItems(candidateData),
+        ...getCandidateItems(window.appendicesCandidates || [])
+      ];
+    }
+
+    function createCandidateAwareRenderer(candidateLookup, { allowAppendix = false } = {}) {
+      return function candidateAwareRenderer(instance, td, row, col, prop, value, cellProperties) {
+        plainTextRenderer(instance, td, row, col, prop, value, cellProperties);
+
+        const normalizedValue = normalizeCandidateValue(value);
+        const isAllowedAppendix = allowAppendix && isAppendixLesionValue(normalizedValue);
+        const isWarning = normalizedValue !== '' && !candidateLookup.has(normalizedValue) && !isAllowedAppendix;
+        td.classList.toggle('candidate-warning-cell', isWarning);
+        if (isWarning) {
+          td.style.setProperty('color', 'var(--danger)', 'important');
+          td.title = 'Not in preset candidates';
+        } else {
+          td.style.removeProperty('color');
+          td.removeAttribute('title');
+        }
+
+        return td;
+      };
+    }
+    
+    // 定義 autocomplete 欄位的預設設定（適用於所有 autocomplete 欄位）
+    const defaultAutocompleteConfig = {
+      type: 'autocomplete',
+      strict: false,    // 預設不限制只能選候選項
+      filter: false,    // 關閉 Handsontable 內建 filter（使用自訂 fuzzy search）
+      renderer: plainTextRenderer  // 選定後只顯示純文字，不保留高亮效果
+    };
+
+    // 通知函數 - 取代 alert
+    function showNotification(message, isError = false) {
+      const notification = document.getElementById('notification');
+      notification.textContent = message;
+      notification.className = isError ? 'show error' : 'show';
+      
+      // 2秒後自動消失
+      setTimeout(() => {
+        notification.className = '';
+      }, 2000);
+    }
+
+    /**
+     * configMyColumns
+     * rawConfigs 陣列的每一個物件，若有 src 屬性，則會根據檔案名稱自動抓取候選資料。
+     */
+    function configMyColumns(rawConfigs) {
+      return rawConfigs.map(config => {
+        if (config.src) {
+          // 假設 "radioactivities.js" 對應的全域變數為 "radioactivitiesCandidates"
+          const candidateVarName = config.src.replace('.js', '') + 'Candidates';
+          const candidateData = window[candidateVarName];
+          if (!candidateData) {
+            console.error(`找不到候選資料：${candidateVarName}`);
+          }
+          const columnCandidateData = getColumnCandidateData(config, candidateData);
+          const candidateLookup = createCandidateLookup(columnCandidateData);
+          return {
+            ...defaultAutocompleteConfig,
+            title: config.title,
+            source: candidateSourceFactory(columnCandidateData),
+            renderer: createCandidateAwareRenderer(candidateLookup, { allowAppendix: config.title === 'Lesions' }),
+            proportion: config.proportion || 1,
+            ...config.overrides
+          };
+        } else {
+          // 非 autocomplete 欄位直接回傳
+          return config;
+        }
+      });
+    }
+    
+    // 原始欄位設定，只需指定 src（例如 "radioactivities.js"）或直接指定 type
+    const rawColumnConfigs = [
+      { title: 'Radioactivities', src: 'radioactivities.js', proportion: 1 },
+      { title: 'Lesions',         src: 'lesions.js',         proportion: 1 },
+      { title: 'Changes',         src: 'changes.js',         proportion: 1 },
+      { title: 'Impressions',     src: 'impressions.js',     proportion: 3 },
+      { title: 'Note',            type: 'text',             proportion: 1.5 },
+      { title: 'S',               type: 'text',             proportion: 0.2 },
+      { title: 'I',               type: 'text',             proportion: 0.2 },
+      { title: 'X',               type: 'text',             proportion: 0.2 },
+      { title: 'Y',               type: 'text',             proportion: 0.2 }
+    ];
+    
+    // 透過 configMyColumns 處理後，得到完整的欄位設定
+    const myColumns = configMyColumns(rawColumnConfigs);
+    const COLUMN_INDEX = {
+      RADIOACTIVITIES: 0,
+      LESIONS: 1,
+      NOTE: 4,
+      S: 5,
+      I: 6
+    };
+    const BONE_SCAN_PROCEDURE = 'A bone scan consisting of whole body and/or spot views is obtained by gamma camera with low energy high resolution collimator 3 hours after the intravenous injection of 20 mCi of Tc-99m MDP.';
+    const PARSER_MODE = {
+      API: 'api',
+      RULE_BASED: 'rule-based'
+    };
+    const DEFAULT_ROW_COUNT = 30;
+    
+    // 取得欄位標題
+    const colHeaders = myColumns.map(col => col.title);
+    const container = document.getElementById('hot');
+    const minColumnWidths = [120, 138, 106, 240, 120, 38, 38, 38, 38];
+    const DEFAULT_RADIOACTIVITY = 'increased radioactivity in {}';
+    const AUTOFILL_DEFAULT_RADIOACTIVITY_SOURCE = 'autofillDefaultRadioactivity';
+    const APPENDIX_RADIOACTIVITY_CLEAR_SOURCE = 'appendixRadioactivityClear';
+    const radioactivityCandidateLookup = new Map(
+      (window.radioactivitiesCandidates || []).map(candidate => [
+        String(candidate || '').replace(/\s+/g, ' ').trim().toLowerCase(),
+        candidate
+      ])
+    );
+    const radioactivityTemplatePrefixes = (window.radioactivitiesCandidates || []).map(candidate => {
+      const prefix = String(candidate || '').replace('{}', '').replace(/\s+/g, ' ').trim();
+      return {
+        candidate,
+        prefix,
+        normalizedPrefix: prefix.toLowerCase()
+      };
+    }).sort((a, b) => b.prefix.length - a.prefix.length);
+    let selectedParserMode = PARSER_MODE.API;
+    let resolvedParserMode = PARSER_MODE.API;
+
+    // 動態計算欄寬：依據容器寬度與各欄比例
+    function calculateColWidth(index) {
+      const totalWidth = Math.max(container.clientWidth, 920);
+      const totalProportion = myColumns.reduce((sum, col) => sum + (col.proportion || 1), 0);
+      const unit = totalWidth / totalProportion;
+      const proportionalWidth = (myColumns[index].proportion || 1) * unit;
+      return Math.max(minColumnWidths[index] || 80, Math.round(proportionalWidth));
+    }
+
+    function shouldAutofillDefaultRadioactivity(oldValue, newValue) {
+      return (String(oldValue || '').trim() === '' || isAppendixLesionValue(oldValue)) &&
+        String(newValue || '').trim() !== '' &&
+        !isAppendixLesionValue(newValue);
+    }
+
+    function isDefaultAutofilledRadioactivity(value) {
+      return normalizeCandidateValue(value) === DEFAULT_RADIOACTIVITY;
+    }
+
+    // 嘗試從本地儲存載入資料
+    function getInitialData() {
+      try {
+        const savedData = localStorage.getItem('tableData');
+        if (savedData) {
+          return JSON.parse(savedData);
+        }
+      } catch (e) {
+        console.error('載入儲存資料失敗', e);
+      }
+      // 默認返回空白表格
+      return Array.from({ length: DEFAULT_ROW_COUNT }, () => Array(myColumns.length).fill(''));
+    }
+
+    // 儲存資料到本地 - 使用無提示或自動消失提示
+    function saveData() {
+      try {
+        const data = hot.getData();
+        localStorage.setItem('tableData', JSON.stringify(data));
+        showNotification('資料已儲存');
+      } catch (e) {
+        console.error('儲存資料失敗', e);
+        showNotification('儲存資料失敗：' + e.message, true);
+      }
+    }
+
+    // 載入已儲存資料
+    function loadData() {
+      try {
+        const savedData = localStorage.getItem('tableData');
+        if (savedData) {
+          hot.loadData(JSON.parse(savedData));
+          refreshReport({ silent: true });
+          showNotification('資料已載入');
+        } else {
+          showNotification('沒有已儲存的資料', true);
+        }
+      } catch (e) {
+        console.error('載入資料失敗', e);
+        showNotification('載入資料失敗：' + e.message, true);
+      }
+    }
+
+    // 清除所有資料
+    function clearData() {
+      if (confirm('確定要清除所有資料嗎？此操作無法復原！')) {
+        hot.loadData(Array.from({ length: DEFAULT_ROW_COUNT }, () => Array(myColumns.length).fill('')));
+        localStorage.removeItem('tableData');
+        refreshReport({ silent: true });
+        showNotification('所有資料已清除');
+      }
+    }
+
+    // 匯出為 CSV
+    function exportToCsv() {
+      try {
+        const data = hot.getData();
+        const headers = colHeaders.join(',');
+        const rows = data.map(row => row.map(cell => {
+          // 處理特殊字符，確保 CSV 格式正確
+          const cellStr = String(cell || '');
+          if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+            return `"${cellStr.replace(/"/g, '""')}"`;
+          }
+          return cellStr;
+        }).join(','));
+        
+        const csvContent = [headers, ...rows].join('\n');
+        
+        // 創建下載連結
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `骨骼掃描_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showNotification('CSV 檔案已下載');
+      } catch (e) {
+        console.error('匯出 CSV 失敗', e);
+        showNotification('匯出 CSV 失敗：' + e.message, true);
+      }
+    }
+
+    function clearReport() {
+      ['textFindings', 'textFindingsSeparated', 'textImpressions']
+        .forEach(id => {
+          document.getElementById(id).value = '';
+        });
+      latestTextImpressionsNegative = '';
+      document.getElementById('reportSection').style.display = 'none';
+    }
+
+    function saveApiKey(showMsg = false) {
+      const apiKey = document.getElementById('openaiApiKey').value.trim();
+      if (apiKey) {
+        localStorage.setItem('openaiApiKey', apiKey);
+        if (showMsg) showNotification('API Key 已儲存');
+      } else {
+        localStorage.removeItem('openaiApiKey');
+        if (showMsg) showNotification('API Key 已清除');
+      }
+    }
+
+    function loadSavedApiKey() {
+      const savedApiKey = localStorage.getItem('openaiApiKey') || '';
+      document.getElementById('openaiApiKey').value = savedApiKey;
+    }
+
+    function normalizeReportInput(reportText) {
+      const normalized = String(reportText || '').trim();
+      if (!normalized) return '';
+      return normalized.includes('Exam Date')
+        ? `Exam Date${normalized.split('Exam Date').slice(1).join('Exam Date')}`
+        : normalized;
+    }
+
+    function normalizeDate(dateString) {
+      if (!dateString || typeof dateString !== 'string') return '';
+      const match = dateString.match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+      if (!match) return '';
+      const [, year, month, day] = match;
+      return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+
+    function normalizeLesionValue(lesion) {
+      return String(lesion || '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s+([,.;:])/g, '$1')
+        .trim();
+    }
+
+    function normalizeNoteValue(note) {
+      return String(note || '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
+
+    function resolveExactRadioactivityCandidate(value) {
+      const normalizedValue = String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      return radioactivityCandidateLookup.get(normalizedValue) || '';
+    }
+
+    function splitEmbeddedRadioactivity(record) {
+      let lesion = normalizeLesionValue(record.lesion);
+      let radioactivity = resolveExactRadioactivityCandidate(record.radioactivity);
+
+      if (radioactivity || !lesion) {
+        return { lesion, radioactivity };
+      }
+
+      const normalizedLesion = lesion.toLowerCase();
+      for (const template of radioactivityTemplatePrefixes) {
+        if (!template.normalizedPrefix) continue;
+        if (normalizedLesion === template.normalizedPrefix) {
+          return { lesion: '', radioactivity: template.candidate };
+        }
+        if (normalizedLesion.startsWith(`${template.normalizedPrefix} `)) {
+          return {
+            lesion: normalizeLesionValue(lesion.slice(template.prefix.length).trim()),
+            radioactivity: template.candidate
+          };
+        }
+      }
+
+      return { lesion, radioactivity: '' };
+    }
+
+    function normalizeParsedRecord(record) {
+      const baseRecord = (record && typeof record === 'object') ? record : {};
+      const splitRecord = splitEmbeddedRadioactivity({
+        lesion: baseRecord.lesion || baseRecord.location || '',
+        radioactivity: baseRecord.radioactivity || '',
+      });
+
+      return {
+        lesion: splitRecord.lesion,
+        radioactivity: splitRecord.radioactivity,
+        note: normalizeNoteValue(
+          baseRecord.note ||
+          baseRecord.impression ||
+          baseRecord.previousImpression ||
+          baseRecord.comment ||
+          ''
+        )
+      };
+    }
+
+    function getLesionCandidateSortRank(lesion) {
+      if (window.lesionCanonicalizer?.getCandidateRank) {
+        return window.lesionCanonicalizer.getCandidateRank(lesion);
+      }
+
+      const normalizedLesion = String(lesion || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const candidateIndex = (window.lesionsCandidates || [])
+        .findIndex(candidate => String(candidate || '').replace(/\s+/g, ' ').trim().toLowerCase() === normalizedLesion);
+
+      return candidateIndex >= 0 ? candidateIndex : Number.POSITIVE_INFINITY;
+    }
+
+    function getFallbackLesionSortRank(lesion) {
+      const rankRules = [
+        { pattern: /skull|frontal|parietal|temporal|occipital|maxilla|mandible|mastoid|paranasal/i, rank: 10 },
+        { pattern: /^(?:upper |middle |lower )?c-?spine|^[c]\d/i, rank: 20 },
+        { pattern: /^(?:upper |middle |lower )?t-?spine|^[t]\d/i, rank: 30 },
+        { pattern: /stern|rib|cost/i, rank: 40 },
+        { pattern: /^(?:lower )?l-?spine|^[l]\d/i, rank: 50 },
+        { pattern: /sacroiliac|si joint|pelvis|pelvic|sacrum|ilium|iliac|ischium|ischia|pubis|pubes|acetabul/i, rank: 60 },
+        { pattern: /clavicle|scapula|shoulder|humer|elbow|radius|ulna|wrist|hand/i, rank: 70 },
+        { pattern: /hip|femur|femora|knee|tibia|fibula|ankle|foot|calcane/i, rank: 80 }
+      ];
+
+      return rankRules.find(rule => rule.pattern.test(lesion))?.rank ?? 999;
+    }
+
+    function sortPreviousReportRecords(records) {
+      return records
+        .map((record, index) => ({
+          record,
+          index,
+          candidateRank: getLesionCandidateSortRank(record.lesion),
+          fallbackRank: getFallbackLesionSortRank(record.lesion)
+        }))
+        .sort((a, b) => {
+          if (a.candidateRank !== b.candidateRank) return a.candidateRank - b.candidateRank;
+          if (a.fallbackRank !== b.fallbackRank) return a.fallbackRank - b.fallbackRank;
+          return a.index - b.index;
+        })
+        .map(item => item.record);
+    }
+
+    function canonicalizePreviousReportRecords(records) {
+      const canonicalizer = window.lesionCanonicalizer;
+      const flattenedRecords = [];
+
+      records.forEach(record => {
+        const normalizedRecord = normalizeParsedRecord(record);
+        const canonicalizedRecords = canonicalizer?.canonicalizeRecord
+          ? canonicalizer.canonicalizeRecord(normalizedRecord)
+          : [normalizedRecord];
+
+        canonicalizedRecords.forEach(canonicalizedRecord => {
+          const normalizedCanonicalRecord = normalizeParsedRecord(canonicalizedRecord);
+          if (normalizedCanonicalRecord.lesion) {
+            flattenedRecords.push(normalizedCanonicalRecord);
+          }
+        });
+      });
+
+      const deduplicated = [];
+      const seen = new Set();
+      flattenedRecords.forEach(record => {
+        const key = record.lesion.replace(/\s+/g, ' ').trim().toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        deduplicated.push(record);
+      });
+
+      return sortPreviousReportRecords(deduplicated);
+    }
+
+    function setParserMode(mode, statusText = '') {
+      selectedParserMode = mode;
+      resolvedParserMode = mode;
+
+      const isApi = mode === PARSER_MODE.API;
+      document.getElementById('parserTabApi').classList.toggle('active', isApi);
+      document.getElementById('parserTabRuleBased').classList.toggle('active', !isApi);
+      document.getElementById('parserStatus').textContent = statusText || (isApi ? '目前模式：API' : '目前模式：Rule-based');
+      document.getElementById('parserHint').textContent = isApi
+        ? 'API 優先，失敗時自動切換到 Rule-based。'
+        : '僅使用本地 Rule-based 解析。';
+    }
+
+    function validateParsedPreviousReport(parsed) {
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('解析結果格式不正確');
+      }
+
+      const examDate = normalizeDate(parsed.examDate || '');
+      let records = [];
+
+      if (Array.isArray(parsed.records)) {
+        records = canonicalizePreviousReportRecords(parsed.records);
+      } else if (Array.isArray(parsed.lesions)) {
+        records = canonicalizePreviousReportRecords(
+          parsed.lesions.map(lesion => ({
+            lesion: normalizeLesionValue(lesion),
+            radioactivity: '',
+            note: ''
+          }))
+        );
+      }
+
+      if (records.length === 0) {
+        throw new Error('找不到可載入的病灶');
+      }
+
+      return {
+        records,
+        examDate
+      };
+    }
+
+    function createEmptyRow() {
+      return Array(myColumns.length).fill('');
+    }
+
+    function populateTableFromPreviousReport(parsedResult) {
+      const normalized = validateParsedPreviousReport(parsedResult);
+      const rowCount = Math.max(DEFAULT_ROW_COUNT, normalized.records.length);
+      const newData = Array.from({ length: rowCount }, () => createEmptyRow());
+      const autofillUpdates = [];
+
+      normalized.records.forEach((record, index) => {
+        newData[index][COLUMN_INDEX.RADIOACTIVITIES] = record.radioactivity || '';
+        newData[index][COLUMN_INDEX.LESIONS] = record.lesion;
+        newData[index][COLUMN_INDEX.NOTE] = record.note || '';
+        if (!record.radioactivity && record.lesion && !isAppendixLesionValue(record.lesion)) {
+          autofillUpdates.push([index, COLUMN_INDEX.RADIOACTIVITIES, DEFAULT_RADIOACTIVITY]);
+        }
+      });
+
+      hot.loadData(newData);
+      if (autofillUpdates.length > 0) {
+        hot.setDataAtCell(autofillUpdates, AUTOFILL_DEFAULT_RADIOACTIVITY_SOURCE);
+      }
+      localStorage.setItem('tableData', JSON.stringify(hot.getData()));
+
+      document.getElementById('examDate').value = normalized.examDate || '';
+      saveDate(false);
+      return normalized;
+    }
+
+    function extractExamDate(reportText) {
+      const examDateMatch = reportText.match(/Exam Date\s*[:：]?\s*(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/i);
+      return examDateMatch ? normalizeDate(examDateMatch[1]) : '';
+    }
+
+    function extractFindingsSection(reportText) {
+      const findingsMatch = reportText.match(/\[Findings\]([\s\S]*?)(?=\[Impression\]|\[Conclusion\]|$)/i);
+      if (findingsMatch) {
+        return findingsMatch[1].trim();
+      }
+
+      const labeledMatch = reportText.match(/Findings?\s*[:：]([\s\S]*?)(?=Impressions?\s*[:：]|Conclusion\s*[:：]|$)/i);
+      if (labeledMatch) {
+        return labeledMatch[1].trim();
+      }
+
+      const sentences = reportText
+        .split(/\n+/)
+        .map(line => line.trim())
+        .filter(line => /(radioactivity|bone scan|Tc-99m|lesion|rib|vertebra|skull)/i.test(line));
+
+      return sentences.join(' ');
+    }
+
+    function expandGroupedRibPhrase(prefix, groupText, suffix) {
+      const cleanedGroupText = groupText.replace(/\band\b/gi, ',');
+      return cleanedGroupText
+        .split(',')
+        .map(part => part.trim())
+        .filter(Boolean)
+        .map(part => `${prefix} ${part} ${suffix}`.replace(/\s+/g, ' ').trim());
+    }
+
+    function extractLesionsFromFindings(findingsText) {
+      let working = ` ${findingsText.replace(/\s+/g, ' ').trim()} `;
+      const lesions = [];
+
+      const structuredChunkPattern = /((?:anterior|posterior|lateral|medial|anterolateral|posterolateral|costovertebral|costochondral|costosternal)\s+aspects?\s+of\s+(?:the\s+)?)?(?:(?:left|right|bilateral)\s+\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?(?:\s*,\s*\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)*(?:\s+and\s+(?:(?:left|right|bilateral)\s+)?\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)*)\s*(rib|ribs|costovertebral joint|costovertebral joints|costovertebral junction|costovertebral junctions|costochondral junction|costochondral junctions|costosternal joint|costosternal joints|costosternal junction|costosternal junctions)/gi;
+      working = working.replace(structuredChunkPattern, match => {
+        const aspectMatch = match.match(/^((?:anterior|posterior|lateral|medial|anterolateral|posterolateral|costovertebral|costochondral|costosternal)\s+aspects?\s+of\s+(?:the\s+)?)?/i);
+        const structureMatch = match.match(/(rib|ribs|costovertebral joint|costovertebral joints|costovertebral junction|costovertebral junctions|costochondral junction|costochondral junctions|costosternal joint|costosternal joints|costosternal junction|costosternal junctions)\s*$/i);
+        const aspect = aspectMatch?.[1] || '';
+        const structure = structureMatch?.[1] || '';
+        const singularStructure = structure.replace(/s\b/i, '');
+        const pairPattern = /(left|right|bilateral)\s+((?:\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)(?:\s*,\s*\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)*(?:\s+and\s+\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)*)/gi;
+        let pairMatch;
+
+        while ((pairMatch = pairPattern.exec(match)) !== null) {
+          const prefix = `${aspect}${pairMatch[1]}`.replace(/\s+/g, ' ').trim();
+          expandGroupedRibPhrase(prefix, pairMatch[2], singularStructure).forEach(item => lesions.push(item));
+        }
+        return ' ';
+      });
+
+      const vertebraPattern = /\b([CTLS]\d+(?:-[CTLS]?\d+)?)\b/g;
+      working = working.replace(vertebraPattern, match => {
+        lesions.push(match.toUpperCase());
+        return ' ';
+      });
+
+      const simplePatterns = [
+        /\bC-T-L-S spine\b/gi,
+        /\bC-T-L spine\b/gi,
+        /\bT-L-S spine\b/gi,
+        /\bT-L spine\b/gi,
+        /\bL-S spine\b/gi,
+        /\b(?:upper|middle|lower)\s+C-spine\b/gi,
+        /\b(?:upper|middle|lower)\s+cervical spine\b/gi,
+        /\bC-spine\b/gi,
+        /\bcervical spine\b/gi,
+        /\b(?:upper|middle)\s+T-spine\b/gi,
+        /\b(?:upper|middle)\s+thoracic spine\b/gi,
+        /\bT-spine\b/gi,
+        /\bthoracic spine\b/gi,
+        /\blower L-spine\b/gi,
+        /\blower lumbar spine\b/gi,
+        /\bL-spine\b/gi,
+        /\blumbar spine\b/gi,
+        /\bL spine\b/gi,
+        /\bskull\b/gi,
+        /\bbilateral maxillae\b/gi,
+        /\bbilateral maxillary areas\b/gi,
+        /\bleft maxilla\b/gi,
+        /\bright maxilla\b/gi,
+        /\bmaxilla\b/gi,
+        /\b(?:left|right|middle) part of (?:the )?mandible\b/gi,
+        /\bleft mandible\b/gi,
+        /\bright mandible\b/gi,
+        /\bmandible\b/gi,
+        /\bleft mastoid region\b/gi,
+        /\bright mastoid region\b/gi,
+        /\bparanasal region\b/gi,
+        /\bleft sacroiliac joint\b/gi,
+        /\bright sacroiliac joint\b/gi,
+        /\bbilateral sacroiliac joints\b/gi,
+        /\b(?:left|right|bilateral)\s+SI\s+junctions?\b/gi,
+        /\b(?:left|right|bilateral)\s+SI\s+joints?\b/gi,
+        /\bsternum\b/gi,
+        /\b(?:left|right|bilateral)\s+sterno-clavicular\s+junctions?\b/gi,
+        /\b(?:left|right|bilateral)\s+sternoclavicular\s+junctions?\b/gi,
+        /\b(?:left|right|bilateral)\s+sternoclavicular\s+joints?\b/gi,
+        /\bpelvis\b/gi,
+        /\bbilateral pelvic bones\b/gi,
+        /\bleft pelvic bones\b/gi,
+        /\bright pelvic bones\b/gi,
+        /\bbilateral ilia\b/gi,
+        /\bleft ilium\b/gi,
+        /\bright ilium\b/gi,
+        /\b(?:left|right|bilateral)\s+iliac bones?\b/gi,
+        /\bbilateral ischia\b/gi,
+        /\bleft ischium\b/gi,
+        /\bright ischium\b/gi,
+        /\bbilateral pubic bones\b/gi,
+        /\bleft pubic bone\b/gi,
+        /\bright pubic bone\b/gi,
+        /\bbilateral pubes\b/gi,
+        /\bleft pubis\b/gi,
+        /\bright pubis\b/gi,
+        /\bbilateral acetabulums\b/gi,
+        /\bbilateral acetabula\b/gi,
+        /\bleft acetabulum\b/gi,
+        /\bright acetabulum\b/gi,
+        /\bleft femur\b/gi,
+        /\bright femur\b/gi,
+        /\bbilateral femurs\b/gi,
+        /\bbilateral femora\b/gi,
+        /\bleft proximal femur\b/gi,
+        /\bright proximal femur\b/gi,
+        /\bbilateral proximal femurs\b/gi,
+        /\bbilateral proximal femora\b/gi,
+        /\bleft humerus\b/gi,
+        /\bright humerus\b/gi,
+        /\bbilateral humeri\b/gi,
+        /\bleft scapula\b/gi,
+        /\bright scapula\b/gi,
+        /\bbilateral scapulae\b/gi,
+        /\bleft clavicle\b/gi,
+        /\bright clavicle\b/gi,
+        /\bbilateral clavicles\b/gi,
+        /\bleft tibia\b/gi,
+        /\bright tibia\b/gi,
+        /\bleft fibula\b/gi,
+        /\bright fibula\b/gi,
+        /\bleft radius\b/gi,
+        /\bright radius\b/gi,
+        /\bleft ulna\b/gi,
+        /\bright ulna\b/gi
+      ];
+
+      simplePatterns.forEach(pattern => {
+        working = working.replace(pattern, match => {
+          lesions.push(match.toLowerCase() === 'skull' ? 'skull' : normalizeLesionValue(match));
+          return ' ';
+        });
+      });
+
+      return lesions;
+    }
+
+    function sortLesionsHeadToToe(lesions) {
+      const rankRules = [
+        { pattern: /skull/i, rank: 10 },
+        { pattern: /^[c]\d/i, rank: 20 },
+        { pattern: /^[t]\d/i, rank: 30 },
+        { pattern: /rib|sternum|cost/i, rank: 40 },
+        { pattern: /^[l]\d/i, rank: 50 },
+        { pattern: /sacroiliac|pelvis|sacrum/i, rank: 60 },
+        { pattern: /femur/i, rank: 70 },
+        { pattern: /humerus/i, rank: 80 }
+      ];
+
+      return lesions
+        .map((lesion, index) => ({ lesion, index }))
+        .sort((a, b) => {
+          const rankA = rankRules.find(rule => rule.pattern.test(a.lesion))?.rank ?? 999;
+          const rankB = rankRules.find(rule => rule.pattern.test(b.lesion))?.rank ?? 999;
+          if (rankA !== rankB) return rankA - rankB;
+          return a.index - b.index;
+        })
+        .map(item => item.lesion);
+    }
+
+    function parsePreviousReportRuleBased(reportText) {
+      const normalizedReport = normalizeReportInput(reportText);
+      const findingsText = extractFindingsSection(normalizedReport);
+      const lesions = extractLesionsFromFindings(findingsText);
+      const uniqueLesions = Array.from(new Set(lesions.map(normalizeLesionValue).filter(Boolean)));
+
+      return {
+        records: sortLesionsHeadToToe(uniqueLesions).map(lesion => ({
+          lesion,
+          radioactivity: '',
+          note: ''
+        })),
+        examDate: extractExamDate(normalizedReport)
+      };
+    }
+
+    async function callOpenAIForPreviousReport(reportText, apiKey) {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0,
+          max_tokens: 1200,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: `Extract structured data from a prior bone scan report and return a JSON object only, with this exact shape: {"examDate":"YYYY-MM-DD or empty string","records":[{"lesion":"string","radioactivity":"string","note":"string"}]}. Each record must represent one lesion. "lesion" is required. "radioactivity" should be one exact string from this allowed list when highly confident, otherwise "":
+${JSON.stringify(window.radioactivitiesCandidates || [])}
+"note" should be a concise prior impression/comment summary specifically relevant to that lesion; if not clear, use "". Prefer concise canonical app wording when obvious, such as "C-spine" rather than "cervical spine", "left SI joint" rather than "left SI junction", "right sternoclavicular joint" rather than "right sterno-clavicular junction", and "bilateral maxilla" rather than "bilateral maxillae". Still extract meaningful lesions even if the wording is not in the app vocabulary. Keep records organized roughly from head to toe.`
+            },
+            {
+              role: 'user',
+              content: normalizeReportInput(reportText)
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenAI API error (${response.status})`);
+      }
+
+      const payload = await response.json();
+      const content = payload?.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error('OpenAI API 未回傳可解析內容');
+      }
+
+      return validateParsedPreviousReport(JSON.parse(content));
+    }
+
+    async function loadPreviousReport() {
+      const reportText = document.getElementById('previousReportInput').value.trim();
+      if (!reportText) {
+        showNotification('請先貼上先前報告內容', true);
+        return;
+      }
+
+      const apiKey = document.getElementById('openaiApiKey').value.trim();
+      let parsedResult;
+
+      if (selectedParserMode === PARSER_MODE.RULE_BASED) {
+        try {
+          parsedResult = validateParsedPreviousReport(parsePreviousReportRuleBased(reportText));
+          setParserMode(PARSER_MODE.RULE_BASED, '本次使用 Rule-based');
+        } catch (error) {
+          console.error('Rule-based parsing failed:', error);
+          showNotification(`先前報告解析失敗：${error.message}`, true);
+          return;
+        }
+      } else {
+        try {
+          if (!apiKey) {
+            throw new Error('No API key');
+          }
+          parsedResult = await callOpenAIForPreviousReport(reportText, apiKey);
+          setParserMode(PARSER_MODE.API, '本次使用 API');
+        } catch (apiError) {
+          console.warn('API parsing failed, fallback to rule-based parser.', apiError);
+          try {
+            parsedResult = validateParsedPreviousReport(parsePreviousReportRuleBased(reportText));
+            setParserMode(
+              PARSER_MODE.RULE_BASED,
+              apiKey ? 'API 失敗，已切換至 Rule-based' : '未提供 API Key，已切換至 Rule-based'
+            );
+          } catch (fallbackError) {
+            console.error('Rule-based parsing failed:', fallbackError);
+            showNotification(`先前報告解析失敗：${fallbackError.message}`, true);
+            return;
+          }
+        }
+      }
+
+      const normalized = populateTableFromPreviousReport(parsedResult);
+      refreshReport({ silent: true });
+      showNotification(`${resolvedParserMode === PARSER_MODE.API ? 'API' : 'Rule-based'} 已載入 ${normalized.records.length} 筆病灶`);
+    }
+
+    let refreshTimer = null;
+    let latestTextImpressionsNegative = '';
+
+    function scheduleRefreshReport() {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshReport({ silent: true });
+      }, 350);
+    }
+
+    function refreshReport({ silent = false } = {}) {
+      const examDate = document.getElementById('examDate').value.trim();
+      const tableData = hot.getData();
+
+      try {
+        const report = window.reportGenerator.getReport(tableData, examDate);
+
+        document.getElementById('textFindings').value = report.textFindings;
+        document.getElementById('textFindingsSeparated').value = report.textFindingsSeparated;
+        document.getElementById('textImpressions').value = report.textImpressions;
+        latestTextImpressionsNegative = report.textImpressionsNegative || '';
+        document.getElementById('reportSection').style.display = 'flex';
+
+        if (!silent) {
+          showNotification('報告已生成');
+        }
+      } catch (error) {
+        console.error('生成報告時發生錯誤:', error);
+        if (!silent) {
+          showNotification('生成報告時發生錯誤: ' + error.message, true);
+        }
+      }
+    }
+
+    function generateKeyword(tableData) {
+      return (tableData || [])
+        .map(row => {
+          const lesion = normalizeLesionValue(row?.[COLUMN_INDEX.LESIONS]);
+          const sValue = String(row?.[COLUMN_INDEX.S] || '').trim();
+          const iValue = String(row?.[COLUMN_INDEX.I] || '').trim();
+          const scores = [
+            sValue ? `S: ${sValue}` : '',
+            iValue ? `I: ${iValue}` : ''
+          ].filter(Boolean).join(' ');
+
+          return lesion && scores ? `${lesion} → ${scores}` : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    // 初始化 Handsontable
+    const hot = new Handsontable(container, {
+      data: getInitialData(),
+      columns: myColumns,
+      colHeaders,
+      rowHeaders: true,
+      manualColumnResize: true,
+      manualRowMove: true,
+      colWidths: index => calculateColWidth(index),
+      stretchH: 'none',
+      licenseKey: 'non-commercial-and-evaluation',
+      // 自動儲存功能 - 當編輯完成時觸發
+      afterChange: function(changes, source) {
+        if (changes &&
+            source !== 'loadData' &&
+            source !== AUTOFILL_DEFAULT_RADIOACTIVITY_SOURCE &&
+            source !== APPENDIX_RADIOACTIVITY_CLEAR_SOURCE) {
+          const radioactivityUpdates = [];
+          changes.forEach(([row, prop, oldValue, newValue]) => {
+            if (prop !== COLUMN_INDEX.LESIONS) {
+              return;
+            }
+            const currentRadioactivity = hot.getDataAtCell(row, COLUMN_INDEX.RADIOACTIVITIES);
+            if (isAppendixLesionValue(newValue)) {
+              if (isDefaultAutofilledRadioactivity(currentRadioactivity)) {
+                radioactivityUpdates.push([row, COLUMN_INDEX.RADIOACTIVITIES, '']);
+              }
+              return;
+            }
+            if (!shouldAutofillDefaultRadioactivity(oldValue, newValue)) {
+              return;
+            }
+            if (String(currentRadioactivity || '').trim() !== '') {
+              return;
+            }
+            radioactivityUpdates.push([row, COLUMN_INDEX.RADIOACTIVITIES, DEFAULT_RADIOACTIVITY]);
+          });
+
+          if (radioactivityUpdates.length > 0) {
+            const updateSource = radioactivityUpdates.some(([, , value]) => value === '')
+              ? APPENDIX_RADIOACTIVITY_CLEAR_SOURCE
+              : AUTOFILL_DEFAULT_RADIOACTIVITY_SOURCE;
+            hot.setDataAtCell(radioactivityUpdates, updateSource);
+          }
+        }
+
+        if (source !== 'loadData') {
+          // 只有用戶編輯時才自動儲存，但不顯示通知
+          try {
+            const data = hot.getData();
+            localStorage.setItem('tableData', JSON.stringify(data));
+            scheduleRefreshReport();
+            // 編輯時不顯示通知，避免干擾
+          } catch (e) {
+            console.error('自動儲存失敗', e);
+            // 只有失敗時才顯示通知
+            showNotification('自動儲存失敗：' + e.message, true);
+          }
+        }
+      }
+    });
+
+    // 視窗大小改變時，更新欄寬並清除緩存
+    window.addEventListener('resize', () => {
+      hot.updateSettings({
+        colWidths: index => calculateColWidth(index)
+      });
+      hot.render();
+      clearCaches(); // 清除搜索和正則表達式緩存
+    });
+
+    // 日期相關函數
+    function saveDate(showMsg = false) {
+      const dateInput = document.getElementById('examDate');
+      const date = dateInput.value;
+      if (date && date.trim() !== "") {
+        localStorage.setItem('savedDate', date.trim());
+        if (showMsg) showNotification('日期已儲存');
+      } else {
+        localStorage.removeItem('savedDate');
+        if (showMsg) showNotification('日期已清除');
+      }
+    }
+
+    function getSavedDate() {
+      return localStorage.getItem('savedDate') || "";
+    }
+
+    function loadSavedDate() {
+      const savedDate = getSavedDate();
+      if (savedDate) {
+        document.getElementById('examDate').value = savedDate;
+      }
+    }
+
+    // 載入測試資料
+    function loadTestData() {
+      const testData = [
+        ['radioactivities', 'lesions', 'changes', 'impressions', 'note', 's', 'i', 'x', 'y'],
+        ['heterogeneously increased radioactivity in {}', 'L5', '', 'Possible bone metastasis in {lesion}.', '', '5', '48', '', ''],
+        ['heterogeneously increased radioactivity in {}', 'L4', '', 'Possible bone metastasis in {lesion}.', '', '', '', '', ''],
+        ['heterogeneously increased radioactivity in {}', 'L3', '', 'Possible bone metastasis in {lesion}.', '', '', '', '', ''],
+        ['focal increased radioactivity in {}', 'left 5th rib', 'newly noted', 'probable bone metastasis', '', '2', '', '', ''],
+        ['increased radioactivity in {}', 'right 8th-9th ribs', 'more intense', 'progressive bone metastases', '', '', '21', '', '']
+      ];
+      
+      hot.loadData(testData.slice(1)); // 跳過標題行
+      localStorage.setItem('tableData', JSON.stringify(testData.slice(1)));
+      refreshReport({ silent: true });
+      showNotification('測試資料已載入');
+    }
+
+    // 複製到剪貼板功能
+    function copyToClipboard(textareaId, triggerBtn = null) {
+      const textarea = document.getElementById(textareaId);
+      const text = textarea.value;
+      copyTextValue(text, triggerBtn);
+    }
+
+    function copyNegativeImpression(triggerBtn = null) {
+      copyTextValue(latestTextImpressionsNegative, triggerBtn);
+    }
+
+    function copyTextValue(text, triggerBtn = null) {
+      
+      if (!text || text.trim() === '') {
+        showNotification('沒有內容可以複製', true);
+        return;
+      }
+      
+      // 使用現代的 Clipboard API
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => {
+          showCopySuccess(triggerBtn);
+        }).catch(err => {
+          // 如果 Clipboard API 失敗，使用舊方法
+          fallbackCopyTextToClipboard(text, triggerBtn);
+        });
+      } else {
+        // 不支援 Clipboard API，使用舊方法
+        fallbackCopyTextToClipboard(text, triggerBtn);
+      }
+    }
+
+    // 舊版瀏覽器的複製方法
+    function fallbackCopyTextToClipboard(text, triggerBtn = null) {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          showCopySuccess(triggerBtn);
+        } else {
+          showNotification('複製失敗', true);
+        }
+      } catch (err) {
+        showNotification('複製功能不支援', true);
+      }
+      
+      document.body.removeChild(textArea);
+    }
+
+    // 顯示複製成功效果
+    function showCopySuccess(copyBtn) {
+      if (!copyBtn) {
+        showNotification('已複製到剪貼板');
+        return;
+      }
+      const originalText = copyBtn.textContent;
+      
+      copyBtn.textContent = '已複製';
+      copyBtn.classList.add('copied');
+      
+      showNotification('已複製到剪貼板');
+      
+      setTimeout(() => {
+        copyBtn.textContent = originalText;
+        copyBtn.classList.remove('copied');
+      }, 1500);
+    }
+
+    // 生成報告函數
+    function generateReport() {
+      saveDate(true);
+      refreshReport();
+    }
+
+    function sendReportData() {
+      const examDate = document.getElementById('examDate').value.trim();
+      const tableData = hot.getData();
+
+      try {
+        const report = window.reportGenerator.getReport(tableData, examDate);
+        const reportData = {
+          Procedure: BONE_SCAN_PROCEDURE,
+          Findings: report.textFindings || '',
+          Impression: report.textImpressions || '',
+          Keyword: generateKeyword(tableData)
+        };
+
+        document.getElementById('textFindings').value = reportData.Findings;
+        document.getElementById('textFindingsSeparated').value = report.textFindingsSeparated || '';
+        document.getElementById('textImpressions').value = reportData.Impression;
+        latestTextImpressionsNegative = report.textImpressionsNegative || '';
+        document.getElementById('reportSection').style.display = 'flex';
+
+        if (window.opener) {
+          window.opener.postMessage(reportData, '*');
+          showNotification('Report data sent');
+          console.log('Report data sent:', reportData);
+        } else {
+          showNotification('No opener found, unable to send data', true);
+          console.error('No opener found, unable to send data', reportData);
+        }
+      } catch (error) {
+        console.error('送出報告資料時發生錯誤:', error);
+        showNotification('送出報告資料時發生錯誤: ' + error.message, true);
+      }
+    }
+
+    // 初始化時載入儲存的日期
+    loadSavedDate();
+    loadSavedApiKey();
+    setParserMode(PARSER_MODE.API);
+    refreshReport({ silent: true });
+
+    // 綁定按鈕事件
+    document.getElementById('saveBtn').addEventListener('click', saveData);
+    document.getElementById('loadBtn').addEventListener('click', loadData);
+    document.getElementById('exportBtn').addEventListener('click', exportToCsv);
+    document.getElementById('clearBtn').addEventListener('click', clearData);
+    document.getElementById('loadTestDataBtn').addEventListener('click', loadTestData);
+    document.getElementById('generateReportBtn').addEventListener('click', generateReport);
+    document.getElementById('sendReportDataBtn').addEventListener('click', sendReportData);
+    document.getElementById('saveApiKeyBtn').addEventListener('click', () => saveApiKey(true));
+    document.getElementById('loadPreviousReportBtn').addEventListener('click', loadPreviousReport);
+    document.getElementById('parserTabApi').addEventListener('click', () => setParserMode(PARSER_MODE.API));
+    document.getElementById('parserTabRuleBased').addEventListener('click', () => setParserMode(PARSER_MODE.RULE_BASED));
+    
+    // 日期變更時自動儲存（不顯示提示）
+    document.getElementById('examDate').addEventListener('change', () => {
+      saveDate(false);
+      scheduleRefreshReport();
+    });
+    document.getElementById('openaiApiKey').addEventListener('change', () => saveApiKey(false));
+  </script>
+</body>
+</html>

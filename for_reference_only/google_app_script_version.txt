@@ -1,0 +1,2888 @@
+﻿var AppConfig = (function() {
+  var activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = {};
+
+
+  var SHEET_NAMES = {
+    RECORDS: 'Records',
+    RADIOACTIVITIES: 'Radioactivities',
+    LESIONS: 'Lesions',
+    CHANGES: 'Changes',
+    IMPRESSIONS: 'Impressions'
+  };
+
+
+  var COLUMN_INDICES = {
+    RADIOACTIVITIES: 0,
+    S: 1,
+    I: 2,
+    X: 3,
+    Y: 4, 
+    NOTE: 5,
+    LESIONS: 6,
+    CHANGES: 7,
+    IMPRESSIONS: 8,
+  };
+
+
+  var sheetValues = {};
+  var changeDict = null;
+  function getSheet(sheetName) {
+    if (!sheets[sheetName]) {
+      sheets[sheetName] = activeSpreadsheet.getSheetByName(SHEET_NAMES[sheetName]);
+    }
+    return sheets[sheetName];
+  }
+
+
+  function getSheetValues(sheetName) {
+    if (!sheetValues[sheetName]) {
+      var sheet = getSheet(sheetName);
+      var values = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
+      sheetValues[sheetName] = values.filter(row => row[0] !== '').map(row => row[0]);
+    }
+    return sheetValues[sheetName];
+  }
+
+
+  function getChangeDict() {
+    if (changeDict === null) {
+      var sheet = getSheet('CHANGES');
+      var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+      changeDict = values.reduce((acc, [key, value]) => {
+        if (key !== '') {
+          acc[key] = value;
+        }
+        return acc;
+      }, {});
+    }
+    return changeDict;
+  }
+
+
+  function preloadCommonSheets() {
+    getSheet('RECORDS');
+    getSheet('LESIONS');
+    getSheetValues('RADIOACTIVITIES');
+    getSheetValues('LESIONS');
+    getSheetValues('CHANGES');
+    getSheetValues('IMPRESSIONS');
+    getChangeDict(); // 預加載 Change 字典
+  }
+
+
+  // 新增的部分开始
+  var pluralExceptions = {
+    'pubis': 'pubes',
+    'radius': 'radii',
+    'ulna': 'ulnae',
+    'tibia': 'tibiae',
+    'fibula': 'fibulae',
+    'maxilla': 'maxillae',
+    'sternum': 'sternum',
+    'ilium': 'ilia',
+    'ischium': 'ischia',
+    'acetabulum': 'acetabula',
+    'calcaneus': 'calcanei',
+    'humerus': 'humeri',
+    'femur': 'femora',
+    'scapula': 'scapulae',
+    'mandible': 'mandible',
+    'foot': 'feet',
+    'tibia/fibula': 'tibiae/fibulae',
+    'radius/ulna': 'radii/ulnae',
+    'acromioclavicular joint': 'acromioclavicular joints',
+    'occipital bone': 'occipital bone',
+    'frontal bone': 'frontal bone',
+    'superior pubic ramus': 'superior pubic rami',
+    'inferior pubic ramus': 'inferior pubic rami',
+    'iliac crest': 'iliac crests',
+    'humeral shaft': 'humeral shafts',
+    'femoral shaft': 'femoral shafts',
+    'ribs': 'ribs',
+    'pelvic bones': 'pelvic bones',
+    'sacrum': 'sacrum',
+    'supraorbital area of frontal bone': 'supraorbital areas of frontal bone',
+    'temporal mastoid process': 'temporal mastoid processes'
+  };
+
+
+  function getPluralExceptions() {
+    return pluralExceptions;
+  }
+
+
+  function updatePluralExceptions(newExceptions) {
+    // 合并新的例外情况，而不是完全替换
+    pluralExceptions = {...pluralExceptions, ...newExceptions};
+  }
+
+
+  function applyPluralExceptions(word) {
+    const lowerWord = word.toLowerCase();
+    if (pluralExceptions.hasOwnProperty(lowerWord)) {
+      const replacement = pluralExceptions[lowerWord];
+      // 检查原始单词是否全部小写
+      if (word === word.toLowerCase()) {
+        return replacement.toLowerCase();
+      }
+      // 检查原始单词是否首字母大写
+      if (word === word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()) {
+        return replacement.charAt(0).toUpperCase() + replacement.slice(1).toLowerCase();
+      }
+      // 如果是其他情况（如全大写），保持替换词的原样
+      return replacement;
+    }
+    return word;
+  }
+
+
+  // 新增的部分结束
+
+
+  return {
+    getSheet: getSheet,
+    SHEET_NAMES: SHEET_NAMES,
+    COLUMN_INDICES: COLUMN_INDICES,
+    getSheetValues: getSheetValues,
+    getChangeDict: getChangeDict,
+    preloadCommonSheets: preloadCommonSheets,
+    // 新增的返回项
+    getPluralExceptions: getPluralExceptions,
+    updatePluralExceptions: updatePluralExceptions,
+    applyPluralExceptions: applyPluralExceptions
+  };
+})();
+
+
+AppConfig.preloadCommonSheets();
+
+
+function clearRecords () {
+  const recordsSheet = AppConfig.getSheet('RECORDS');
+  const rangeRecords = recordsSheet.getRange('A2:I');
+  rangeRecords.clear();
+}
+
+
+function showSidebar() {
+  const html = HtmlService.createHtmlOutputFromFile('Sidebar')
+    .setTitle('Fuzzy Search');
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+
+function getOptionsFromSpecificSheets(sheetConfigs) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var options = {};
+  sheetConfigs.forEach(function(config) {
+    var sheet = ss.getSheetByName(config.name);
+    if (sheet) {
+      var range = sheet.getRange(config.range);
+      options[config.name] = range.getValues().flat().filter(String);
+    }
+  });
+  return options;
+}
+
+
+function handleSelection(sheetName, value) {
+  // 根據不同的 sheetName 執行不同的操作
+  switch(sheetName) {
+    case 'Lesions':
+      // 處理 Lesions 工作表的選擇
+      return appendLesions(value);
+    case 'Changes':
+      return updateChanges(value);
+    case 'Impressions':
+      return updateImpressions(value);
+    case 'Radioactivities':
+      return updateRadioactivities(value);
+    case 'Appendices':
+      return appendAppendices(value);
+    default:
+      // 處理其他情況
+      return 'Unhandled sheet: ' + sheetName;
+  }
+}
+
+
+// const { LESIONS, RADIOACTIVITIES, IMPRESSIONS } = AppConfig.COLUMN_INDICES;
+function updateChanges(value) {
+  setSelectedRowsToValue(columnIndex = AppConfig.COLUMN_INDICES.CHANGES + 1, value)
+}
+ 
+function updateImpressions(value) {
+  setSelectedRowsToValue(columnIndex = AppConfig.COLUMN_INDICES.IMPRESSIONS + 1, value)
+}
+
+
+function updateRadioactivities(value) {
+  setSelectedRowsToValue(columnIndex = AppConfig.COLUMN_INDICES.RADIOACTIVITIES + 1, value)
+}
+
+
+function appendAppendices(value) {
+  var sheetRecords = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Records');
+  var lastRow = sheetRecords.getLastRow();
+  let indexColumnLesions = AppConfig.COLUMN_INDICES.LESIONS + 1;
+  sheetRecords.getRange(lastRow + 1, indexColumnLesions).setValue(value);
+  return 'Added to Lesions: ' + value;  
+}
+
+
+function appendLesions(value) {
+  var sheetRecords = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Records');
+  var lastRow = sheetRecords.getLastRow();
+  let indexColumnLesions = AppConfig.COLUMN_INDICES.LESIONS + 1;
+  let indexColumnRadioactivities = AppConfig.COLUMN_INDICES.RADIOACTIVITIES + 1;
+  let rangeLesion = sheetRecords.getRange(lastRow + 1, indexColumnLesions);
+  rangeLesion.setValue(value);
+  sheetRecords.getRange(lastRow + 1, indexColumnRadioactivities).setValue('increased radioactivity in the {lesion}')
+  sheetRecords.setCurrentCell(rangeLesion)
+  return 'Added to Lesions: ' + value;
+}
+
+
+
+
+function setSelectedRowsToValue(columnIndex, value) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var selection = sheet.getSelection();
+  var ranges = selection.getActiveRangeList().getRanges();
+  
+  for (var i = 0; i < ranges.length; i++) {
+    var range = ranges[i];
+    var startRow = range.getRow();
+    var numRows = range.getNumRows();
+    
+    // 設置指定列的值
+    sheet.getRange(startRow, columnIndex, numRows, 1).setValue(value);
+  }
+  
+  return "已更新 " + ranges.length + " 個範圍的值為 '" + value + "'";
+}
+
+
+function saveDate(date) {
+  var userProperties = PropertiesService.getUserProperties();
+  if (date && date.trim() !== "") {
+    userProperties.setProperty('savedDate', date.trim());
+  } else {
+    userProperties.deleteProperty('savedDate');
+  }
+}
+
+
+function getSavedDate() {
+  var userProperties = PropertiesService.getUserProperties();
+  var savedDate = userProperties.getProperty('savedDate');
+  return savedDate || "";  // 如果savedDate為null或undefined，返回空字符串
+}
+
+
+function updateDateFromServer(newDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) && newDate !== '') {
+    throw new Error('Invalid date format. Use YYYY-MM-DD or empty string.');
+  }
+  saveDate(newDate);
+  return newDate;
+}
+
+
+function getReport() {
+  // 使用 AppConfig 來獲取 Sheet 和列索引
+  const recordsSheet = AppConfig.getSheet('RECORDS');
+  const radioactivitiesSheet = AppConfig.getSheet('RADIOACTIVITIES');
+  const changeSheet = AppConfig.getSheet('CHANGES');
+  const { LESIONS, RADIOACTIVITIES, CHANGES, IMPRESSIONS } = AppConfig.COLUMN_INDICES;
+
+
+  const lastRow = recordsSheet.getLastRow();
+  const lastColumn = recordsSheet.getLastColumn();
+  const dataRange = recordsSheet.getRange(1, 1, lastRow, lastColumn);
+  const recordsValues = dataRange.getValues();
+  const changesOrder = AppConfig.getSheetValues('CHANGES');
+  const saveDate = getSavedDate();
+
+
+
+
+  // 定義要處理的範圍（假設從第2行開始，到最後一行）
+  const startRow = 2; // 假設第1行是標題行
+  const endRow = lastRow;
+
+
+  // 使用 reduce 操作來過濾和分類數據
+  const result = recordsValues.slice(startRow - 1, endRow).reduce((acc, row, index) => {
+    if (row[LESIONS] !== '') {
+      acc.selected.push(row);
+      if (row[RADIOACTIVITIES] !== '') {
+        acc.lesions.push(row);
+      } else {
+        acc.appendices.push(row);
+      }
+    }
+    return acc;
+  }, { selected: [], lesions: [], appendices: [] });
+
+
+  
+  let resultLesionsCopy = [];
+  result.lesions.forEach(row => {
+    // 修改正則表達式以捕獲可能的多個方向詞
+    const matchRib = row[LESIONS].match(/(.*?)\b(left|right|bilateral)(?:.*?\b(?:left|right|bilateral))?\b(.*?)\brib(.*)/i);
+    const matchCostovertebralJoint = row[LESIONS].match(/(.*?)\b(left|right|bilateral)(?:.*?\b(?:left|right|bilateral))?\b(.*?)\bcostovertebral joint(.*)/i);
+    const matchCostochondralJunction = row[LESIONS].match(/(.*?)\b(left|right|bilateral)(?:.*?\b(?:left|right|bilateral))?\b(.*?)\bcostochondral junction(.*)/i);
+    const matchVertebralBody = row[LESIONS].match(/(.*?)\bvertebral bod(?:y|ies) of\s+(.*)/i);
+    const matchEndplates = row[LESIONS].match(/(.*?)\bendplate(?:s)? of\s+(.*)/i);
+    const matchFacetJoint = row[LESIONS].match(/(.*?)\b(left|right|bilateral)\s+facet joint(?:s)? of\s+(.*)/i);
+    const matchCostosternalJoint = row[LESIONS].match(/(.*?)\b(left|right|bilateral)(?:.*?\b(?:left|right|bilateral))?\b(.*?)\bcostosternal joint(.*)/i);
+
+
+
+
+    if (!row[LESIONS].includes(',')) {
+      resultLesionsCopy.push(row);
+    }
+    else if (matchRib) {
+    
+      const prefix = matchRib[1].trim();
+      const suffix = 'rib' + matchRib[4];
+      const directionMatches = row[LESIONS].match(/\b(left|right|bilateral)\b\s*((?:\d+(?:st|nd|rd|th)(?:-\d+(?:st|nd|rd|th))?(?:,\s*)?)+)/gi) || [];
+      directionMatches.forEach(match => {
+        const [direction, description] = match.split(/\s+(.+)/);
+        splitRibDescriptions(`${direction} ${description}`).forEach(x => {
+          let rowCurrent = [...row];
+          rowCurrent[LESIONS] = `${prefix} ${x} ${suffix}`.trim();
+          resultLesionsCopy.push(rowCurrent);
+        });
+      });
+    } else if (matchCostovertebralJoint) {
+  
+      const prefix = matchCostovertebralJoint[1].trim();
+      const suffix = 'costovertebral joint' + matchCostovertebralJoint[4];
+      const directionMatches = row[LESIONS].match(/\b(left|right|bilateral)\b\s*((?:\d+(?:st|nd|rd|th)(?:-\d+(?:st|nd|rd|th))?(?:,\s*)?)+)/gi) || [];
+      directionMatches.forEach(match => {
+        const [direction, description] = match.split(/\s+(.+)/);
+        splitRibDescriptions(`${direction} ${description}`).forEach(x => {
+          let rowCurrent = [...row];
+          rowCurrent[LESIONS] = `${prefix} ${x} ${suffix}`.trim();
+          resultLesionsCopy.push(rowCurrent);
+        });
+      });
+    } else if (matchCostochondralJunction) {
+
+
+      const prefix = matchCostochondralJunction[1].trim();
+      const suffix = 'costochondral junction' + matchCostochondralJunction[4];
+      const directionMatches = row[LESIONS].match(/\b(left|right|bilateral)\b\s*((?:\d+(?:st|nd|rd|th)(?:-\d+(?:st|nd|rd|th))?(?:,\s*)?)+)/gi) || [];
+      directionMatches.forEach(match => {
+        const [direction, description] = match.split(/\s+(.+)/);
+        splitRibDescriptions(`${direction} ${description}`).forEach(x => {
+          let rowCurrent = [...row];
+          rowCurrent[LESIONS] = `${prefix} ${x} ${suffix}`.trim();
+          resultLesionsCopy.push(rowCurrent);
+        });
+      });
+    } else if (matchVertebralBody) {
+      const prefix = matchVertebralBody[1].trim();
+      const vertebralDescriptions = matchVertebralBody[2].split(',').map(s => s.trim());
+      
+      vertebralDescriptions.forEach(description => {
+        let rowCurrent = [...row];
+        rowCurrent[LESIONS] = `${prefix} vertebral ${description.includes('-') ? 'bodies' : 'body'} of ${description}`.trim();
+        resultLesionsCopy.push(rowCurrent);
+      });
+    } else if (matchEndplates) {
+      const prefix = matchEndplates[1].trim();
+      const endplateDescriptions = matchEndplates[2].split(',').map(s => s.trim());
+      
+      endplateDescriptions.forEach(description => {
+        let rowCurrent = [...row];
+        rowCurrent[LESIONS] = `${prefix} endplate${description.includes('-') ? 's' : ''} of ${description}`.trim();
+        resultLesionsCopy.push(rowCurrent);
+      });
+    } else if (matchFacetJoint) {
+      const prefix = matchFacetJoint[1].trim();
+      const direction = matchFacetJoint[2].toLowerCase();
+      const facetDescriptions = matchFacetJoint[3].split(',').map(s => s.trim());
+      
+      facetDescriptions.forEach(description => {
+        let rowCurrent = [...row];
+        const isPlural = description.includes('-') || facetDescriptions.length > 1;
+        rowCurrent[LESIONS] = `${prefix} ${direction} facet joint${isPlural ? 's' : ''} of ${description}`.trim();
+        resultLesionsCopy.push(rowCurrent);
+      });
+    } else if (matchCostosternalJoint) {
+  
+      const prefix = matchCostosternalJoint[1].trim();
+      const suffix = 'costosternal joint' + matchCostosternalJoint[4];
+      const directionMatches = row[LESIONS].match(/\b(left|right|bilateral)\b\s*((?:\d+(?:st|nd|rd|th)(?:-\d+(?:st|nd|rd|th))?(?:,\s*)?)+)/gi) || [];
+      directionMatches.forEach(match => {
+        const [direction, description] = match.split(/\s+(.+)/);
+        splitRibDescriptions(`${direction} ${description}`).forEach(x => {
+          let rowCurrent = [...row];
+          rowCurrent[LESIONS] = `${prefix} ${x} ${suffix}`.trim();
+          resultLesionsCopy.push(rowCurrent);
+        });
+      });
+    }
+
+
+    else {
+      resultLesionsCopy.push(row)
+    }
+  });
+
+
+  result.lesions = resultLesionsCopy
+
+
+  let assembleFindings = assembleItems(getClassifiedLesions(result.lesions, ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']), ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']);
+
+
+
+
+  let assembleRadioactivitiesBeta = assembleItems(getClassifiedLesions(
+    result.lesions.map(row => [...row.slice(0, CHANGES), '', ...row.slice(CHANGES+1)]), 
+    ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']), ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']);
+
+
+  let assembleChangesBeta = assembleItems(getClassifiedLesions(
+    result.lesions.map(row => [...row.slice(0, RADIOACTIVITIES), 'increased radioactivity in the {lesion}', ...row.slice(RADIOACTIVITIES+1)]),
+    ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']), ['CHANGES', 'RADIOACTIVITIES', 'LESIONS'])
+
+
+  let changesFindings = Object.keys(assembleFindings)
+
+
+  let previousLastRadioactivity = '';
+  let radioactivities = radioactivitiesSheet.getRange('A2:A').getValues().flat().filter(x => x != "").map(x => x.replace("{lesion}", "").trim());
+
+
+  changesFindings.filter(x => x != "").forEach(key => {
+    let currentRadioactivities = radioactivities.filter(radioactivity => assembleFindings[key].includes(radioactivity));
+    currentFirstRadioactivity = currentRadioactivities.at(0);
+    if (currentRadioactivities.at(0) == previousLastRadioactivity) {
+      assembleFindings[key] = assembleFindings[key].replace(previousLastRadioactivity, '').trim();
+    }
+    previousLastRadioactivity = currentRadioactivities.at(-1);
+    // assembleFindings
+  })
+
+
+
+
+  let lesionsImpressions = []
+  result.lesions.forEach(
+    (row, index) => {
+      lesionsImpressions.push(row);
+      lesionsImpressions[index][LESIONS] = (row[LESIONS].includes(' of ') && row[LESIONS].includes('rib')) ? row[LESIONS].split(' of ')[1].trim() : row[LESIONS];
+    }
+  )
+  lesionsImpressions.forEach((lesion, index) => {
+    if (!['etastas', 'involvement', 'athologic', 'eactive', 'one lesion'].some(x => lesion[IMPRESSIONS].includes(x)) | (lesion[IMPRESSIONS].includes('uspicious'))) {
+      lesionsImpressions[index][CHANGES] = '';
+    }
+  })
+  // console.log('lesionsImpressions', lesionsImpressions.map(x=> x[IMPRESSIONS].includes('uspicious')))
+
+
+
+
+  let mappingTable = changeSheet.getRange('A2:B').getValues().filter(row => row[0] != '');
+  let mappingChange = {};
+  let mappingChangeInverse = {};
+  mappingTable.forEach(row => {
+    mappingChange[row[0]] = [row[1]];
+    mappingChangeInverse[row[1]] = row[0];
+  })
+
+
+  lesionsImpressions.forEach((lesion, index) => {
+    lesionsImpressions[index][CHANGES] = mappingChangeInverse[mappingChange[lesionsImpressions[index][CHANGES]]];
+  })
+  console.log('lesionsImpressions', lesionsImpressions)
+
+
+  
+  let assembleImpressions = assembleItems(getClassifiedLesions(lesionsImpressions, ['IMPRESSIONS', 'CHANGES', 'LESIONS']), ['IMPRESSIONS', 'CHANGES', 'LESIONS']);
+  
+
+
+
+
+  Object.keys(assembleImpressions).forEach(impression => {
+    assembleImpressions[impression] = assembleImpressions[impression].replace(/;;/g, ';')
+  })
+
+
+  console.log('assembleImpressions', assembleImpressions)
+
+
+  const formatFindings = (changesFindings, assembleFindings, changesOrder, result) => {
+
+
+    const formatLesions = () => result.appendices.map(x => x[LESIONS]).join('\n');
+    if (changesFindings.includes('') && changesFindings.length === 1) {
+      return `Tc-99m MDP whole body bone scan shows ${assembleFindings[''].trim()}.\n\n${formatLesions()}`;
+    }
+
+
+    const formatChanges = () => {
+      const orderedChanges = changesOrder.filter(change => changesFindings.includes(change));
+      const unorderedChanges = changesFindings.filter(change => !changesOrder.includes(change) && change !== '');
+      return [...orderedChanges, ...unorderedChanges]
+        .map(change => change.replace('{lesion}', assembleFindings[change]))
+        .join(' ');
+    };
+
+
+    if (changesFindings.includes('')) {
+      const changes = formatChanges();
+      const additional = capitalizeFirstLetter(assembleFindings[''].trim());
+      return `Tc-99m MDP whole body bone scan shows ${changes} in comparison with the previous study on ${saveDate}.\n\n${additional} ${(additional.match(/ in /g) || []).length > 1 ? 'are' : 'is'} also noted.\n\n${formatLesions()}`;
+    }
+
+
+    const allFindings = Object.entries(assembleFindings)
+      .map(([change, lesion]) => change ? change.replace('{lesion}', lesion) : lesion)
+      .join(' ');
+
+
+    return `Tc-99m MDP whole body bone scan shows ${allFindings} in comparison with the previous study on ${saveDate}.\n\n${formatLesions()}`;
+  };
+
+
+  function formatFindingsBeta (assembleRadioactivitiesBeta, assembleChangesBeta, changesFindings, changesOrder, result) {
+    const formatLesions = () => result.appendices.map(x => x[LESIONS]).join('\n');
+    findingsBeta = [`Tc-99m MDP whole body bone scan shows ${assembleRadioactivitiesBeta['']}.`]
+    if (!(changesFindings.includes('') && changesFindings.length === 1)) {
+      findingsBeta.push(
+      `Notable changes compared to the previous study on ${saveDate}:\n${changesOrder.filter(x => x != '' && Object.keys(assembleChangesBeta).includes(x)).map(
+        change => `${capitalizeFirstLetter(change.replace('{lesion}, ', '').replace(' in {lesion}', '').trim())}: ${assembleChangesBeta[change].replace('increased radioactivity in the ', '')}`
+      ).join('\n')}`
+      )
+    }
+    findingsBeta.push(formatLesions())
+    return findingsBeta.filter(x => x != '').join('\n\n')
+  }
+
+
+
+
+  function formatFindingsSeparated (assembleRadioactivitiesBeta, assembleChangesBeta, changesFindings, changesOrder, result) {
+    const formatLesions = () => result.appendices.map(x => x[LESIONS]).join('\n');
+    findingsSeparated = [`Tc-99m MDP whole body bone scan shows ${assembleRadioactivitiesBeta['']}.`];
+    if (!(changesFindings.includes('') && changesFindings.length === 1)) {
+      findingsSeparated.push(
+        `In comparison with the previous study on ${saveDate}, this study shows ` +
+        changesOrder.filter(x => x != '' && Object.keys(assembleChangesBeta).includes(x)).map(
+        change => change.replace('newly noted', [',', 'and', 'ribs', 'joints', 'junctions', 'bones', 'bilateral'].some(y => assembleChangesBeta[change].includes(y)) ? 'new lesions' : 'new lesion').replace(' in ', ' ').replace(' the ', ' ').replace('{lesion}', '').replace(',', '').replace(';', '').trim() + ' in the ' + assembleChangesBeta[change].replace('increased radioactivity in the ', '')
+      ).join('; ') + '.'
+      )
+    }
+    findingsSeparated.push(formatLesions())
+    return findingsSeparated.filter(x => x != '').join('\n\n')
+  }
+
+
+
+
+  Object.keys(assembleRadioactivitiesBeta).forEach(
+    k => {
+      assembleRadioactivitiesBeta[k] = assembleRadioactivitiesBeta[k].includes('and') ? assembleRadioactivitiesBeta[k]
+        .replace('metastasis ', 'metastases ')
+        .replace('spot ', 'spots ')
+        .replace('insult ', 'insults ')
+        .replace('fracture ', 'fractures ')
+        .replace('area ', 'areas ')
+        .replace('lesion ', 'lesions ')
+        : assembleRadioactivitiesBeta[k]
+    }
+  )  
+  // 使用方法
+  let textFindings = formatFindings(changesFindings, assembleFindings, changesOrder, result);
+  let textFindingsBeta = formatFindingsBeta(assembleRadioactivitiesBeta, assembleChangesBeta, changesFindings, changesOrder, result);
+  textFindingsBeta = textFindingsBeta.replace(/;:/g, ':')
+  let textFindingsSeparated = formatFindingsSeparated(assembleRadioactivitiesBeta, assembleChangesBeta, changesFindings, changesOrder, result);
+
+
+  textFindings = textFindings.split('\n').map(x => (x.startsWith('Faint spots') | x.startsWith('Tiny spots') | x.startsWith('Cold areas')) ? x.replace('is also', 'are also') : x).join("\n");
+  textFindings = changesFindings.filter(change => change != '').length > 1 ? textFindings : textFindings.replace('; in comparison', ' in comparison')
+  textFindings = textFindings.trim()
+
+
+
+
+  const impressionsOrder = AppConfig.getSheetValues('IMPRESSIONS');
+
+
+  // 處理 textImpressions
+  let impressionsMap = new Map();
+
+
+  result.lesions.forEach(lesion => {
+    const impression = lesion[IMPRESSIONS];
+    let formattedImpression = impression in assembleImpressions
+      ? impression.replace('{lesion}', assembleImpressions[impression]).replace(';.', '.').replace(';,', ',')
+      : impression;
+    formattedImpression = (['and', ', ', 'ribs', 'spots', 'lesions', 'areas', 'bodies', 'joints', 'bilateral', 'bones', '; '].some(x =>
+      assembleImpressions[impression]
+        .replace(', newly', '')
+        .replace(', some', '')
+        .replace(', with ', '')
+        .replace(', stationary', '')
+        .replace(', almost', '')
+        .includes(x)
+    )) ?
+      formattedImpression
+        .replace('metastasis ', 'metastases ')
+        .replace('spot ', 'spots ')
+        .replace('insult ', 'insults ')
+        .replace('fracture ', 'fractures ')
+        .replace('area ', 'areas ')
+        .replace('lesion ', 'lesions ')
+      : formattedImpression
+
+
+
+
+    impressionsMap.set(impression, formattedImpression);
+  });
+
+
+
+
+  console.log('impressionsMap', impressionsMap)
+  // 排序 impressions
+  let sortedImpressions = Array.from(impressionsMap.entries()).sort((a, b) => {
+    const indexA = impressionsOrder.indexOf(a[0]);
+    const indexB = impressionsOrder.indexOf(b[0]);
+
+
+    if (indexA === -1 && indexB === -1) return 0;
+    if (indexA === -1) return -1;
+    if (indexB === -1) return 1;
+    return indexA - indexB;
+  });
+
+
+  sortedImpressions = sortedImpressions.map(x => x[1].includes('sinusitis') 
+  ? [x[0],x[1]
+  .replace('bilateral maxilla', 'bilateral maxillary sinuses')
+  .replace('left maxilla', 'left maxillary sinus')
+  .replace('right maxilla', 'right maxillary sinus')
+  .replace('maxilla', 'maxillary sinus')
+  .replace('bilateral paranasal areas', 'bilateral paranasal sinuses')
+  .replace('right paranasal area', 'right paranasal sinus')
+  .replace('left paranasal area', 'left paranasal sinus')
+  .replace('paranasal area', 'paranasal sinus')
+  .replace('ethmoid bone', 'ethmoid sinus')
+  ]
+  : x)
+
+
+  sortedImpressions = sortedImpressions.map(x => x[1].includes('mastoiditis in the ') 
+  ? [x[0],x[1]
+  .replace('mastoiditis in the ', '')
+  .replace('temporal mastoid processes', 'mastoiditis')
+  .replace('temporal mastoid process', 'mastoiditis')
+  ]
+  : x)
+
+
+
+
+  let textImpressions = sortedImpressions
+    .filter(x => x[0] != '' && x[1] != '')
+    .map(([_, formattedImpression], index) => `${index + 1}. ${formattedImpression}`.replace('; and .', '.'))
+    .join('\n')
+    .trim();
+    
+  let textImpressionsNegative = [
+    'No definite evidence of bone metastasis.',
+    ...textImpressions.split('\n').map(x => x.split('. ').slice(1).join('. '))
+  ].map((x, i) => `${i+1}. ${x}`).join('\n')
+  
+
+
+  console.log(textFindings)
+  console.log(textFindingsBeta)
+  console.log(textImpressions)
+  console.log(textImpressionsNegative)
+  console.log(textFindingsSeparated)
+  
+  // 返回結果
+  return {
+    textFindings,
+    textFindingsBeta,
+    textFindingsSeparated, 
+    textImpressions,
+    textImpressionsNegative,
+  };
+}
+
+
+
+
+function getClassifiedLesions(lesions, categories) {
+  // 獲取列索引
+  const indices = categories.reduce((acc, category) => {
+    acc[category] = AppConfig.COLUMN_INDICES[category];
+    return acc;
+  }, {});
+
+
+  // 分類函數
+  function classifyLesions(lesions, categories) {
+    return lesions.reduce((acc, lesion) => {
+      let current = acc;
+      categories.forEach((category, index) => {
+        const value = lesion[indices[category]] || '';
+        if (index === categories.length - 1) {
+          if (!current[value]) current[value] = '';
+        } else {
+          if (!current[value]) current[value] = {};
+          current = current[value];
+        }
+      });
+      return acc;
+    }, {});
+  }
+
+
+  // 執行分類
+  return classifyLesions(lesions, categories);
+}
+
+
+// 輔助函數：格式化輸出
+function formatClassifiedLesions(classifiedLesions, indent = '') {
+  let output = '';
+  for (const [key, value] of Object.entries(classifiedLesions)) {
+    if (typeof value === 'string') {
+      output += `${indent}${key}: ''\n`;
+    } else {
+      output += `${indent}${key}:\n`;
+      output += formatClassifiedLesions(value, indent + '  ');
+    }
+  }
+  return output;
+}
+
+
+
+
+function assembleItems(classifiedLesions, categories) {
+    const [CATEGORY1, CATEGORY2, CATEGORY3] = categories;
+    const changeDict = AppConfig.getChangeDict();
+
+
+    // 獲取排序值
+    const sortingValues = categories.reduce((acc, category) => {
+        acc[category] = AppConfig.getSheetValues(category);
+        return acc;
+    }, {});
+
+
+    function sortByOrder(obj, category) {
+        const order = sortingValues[category];
+        return Object.keys(obj).sort((a, b) => {
+            let placeholders = {'a': a, 'b': b};
+            if (category == 'LESIONS') {
+              Object.keys(placeholders).forEach(key => {
+                if (placeholders[key].match(/^[CTLS]\d+(-[CTLS]?\d+)?$/) && placeholders[key].includes('-')) {
+                  placeholders[key] = placeholders[key].split('-')[0];
+                } else if (placeholders[key].includes('rib')) {
+                  placeholders[key] = 'bilateral ribs';
+                } else if (placeholders[key].includes('vertebral bod')) {
+                  placeholders[key] = 'vertebral body of C1';
+                } else if (placeholders[key].includes('endplate')) {
+                  placeholders[key] = 'endplates of C1-C2';
+                } else if (placeholders[key].includes('facet')) {
+                  placeholders[key] = 'bilateral facet joints of C1-C2';
+                } else if (placeholders[key].includes('costochondral')) {
+                  placeholders[key] = 'bilateral 1st costochondral junctions';
+                } else if (placeholders[key].includes('costovertebral')) {
+                  placeholders[key] = 'bilateral 1st costovertebral joints';
+                } else if (placeholders[key].includes('costosternal')) {
+                  placeholders[key] = 'bilateral 1st costosternal joints';
+                }
+              })              
+            }
+
+
+            const indexA = order.indexOf(placeholders['a']);
+            const indexB = order.indexOf(placeholders['b']);
+            if (indexA === -1 && indexB === -1) return 0;
+            if (indexA === -1) return 1;
+            if (indexB === -1) return -1;
+            return indexA - indexB;
+        });
+    }
+
+
+    let items = {};
+
+
+    for (const category1 of sortByOrder(classifiedLesions, CATEGORY1)) {
+        const dictCategory1 = classifiedLesions[category1];
+        let category1Items = [];
+
+
+        for (const category2 of sortByOrder(dictCategory1, CATEGORY2)) {
+            const lesions = dictCategory1[category2];
+            
+            // 合併 lesions
+            const mergedLesions = mergeLesions(mergeLesionsAnatomies(sortByOrder(lesions, CATEGORY3)), ', ', ' and ', ', and ')
+
+
+            // 處理 CATEGORY2 為 'CHANGES' 的特殊情況
+            let processedCategory2;
+            if (CATEGORY2 === 'CHANGES') {
+                if (category2 === '') {
+                    processedCategory2 = '{lesion}';
+                } else {
+                    processedCategory2 = changeDict?.[category2] ?? category2;
+                }
+            } else {
+                processedCategory2 = category2;
+            }
+
+
+            // 替換 processedCategory2 中的 {lesion}
+            let mergedCategory2 = (processedCategory2 || '').replace('{lesion}', mergedLesions);
+
+
+            category1Items.push(mergedCategory2);
+        }
+
+
+        // 合併該 category1 下的所有 items
+        category1Items.forEach((x, i) => {
+          category1Items[i] = (x.includes('and') | x.includes(','))
+          ? x.replace('area ', 'areas ').replace('spot ', 'spots ').replace('lesion ', 'lesions ')
+          : x
+        })
+        console.log('category1Items', category1Items)
+        if (category1Items.some(x => ['newly', 'progression',].some(y => x.includes(y)) && (!x.includes('while')))) {
+          for (let index = 0; index < category1Items.length; index++) {
+            const item = category1Items[index];
+            if (item.includes(', with regression')) {
+              category1Items[index] = 'while with regression in ' + item.replace(', with regression', '');
+              break;
+            } else if (item.includes(', almost complete resolution')) {
+              category1Items[index] = 'while almost complete resolution in ' + item.replace(', almost complete resolution', '');
+              break;
+            }
+          }
+        }
+
+
+        // category1Items [ 'maxilla, with progression;', 'mandible, with regression;' ]
+        items[category1] = mergeLesions(category1Items, '; ', '; ' , '; and ');
+
+
+    }
+
+
+    return items;
+}
+
+
+function mergeLesions(lesions, placeholder1=', ', placeholder2=' and ', placeholder3=', and ') {
+  if (lesions.length === 0) return '';
+  if (lesions.length === 1) return lesions[0];
+  if (lesions.length === 2) return `${lesions[0]}${placeholder2}${lesions[1]}`;
+  return lesions.slice(0, -1).join(placeholder1) + placeholder3 + lesions[lesions.length - 1];   
+}
+
+
+// 定義常用的 locations 和 sides
+const LOCATIONS = {
+  VERTEBRAE: [...Array(7)].map((_, i) => `C${i + 1}`).concat(
+    [...Array(12)].map((_, i) => `T${i + 1}`),
+    [...Array(5)].map((_, i) => `L${i + 1}`),
+    [...Array(1)].map((_, i) => `S${i + 1}`)),
+  INTERVERTEBRAL: ["C1-C2", "C2-C3", "C3-C4", "C4-C5", "C5-C6", "C6-C7", "C7-T1",
+    "T1-T2", "T2-T3", "T3-T4", "T4-T5", "T5-T6", "T6-T7", "T7-T8", "T8-T9", "T9-T10", "T10-T11", "T11-T12", "T12-L1",
+    "L1-L2", "L2-L3", "L3-L4", "L4-L5", "L5-S1"],
+  RIBS: ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th'],
+  RIB_REGIONS: ['anterior', 'lateral', 'posterior', 'anterolateral', 'posterolateral', '']
+};
+
+
+const SIDES = {
+  NONE: [''],
+  BILATERAL: ['left', 'right']
+};
+
+
+class AnatomicalStructure {
+  constructor(locations, sides, dimensionality = 1, updateRules = null) {
+    this.locations = locations;
+    this.sides = sides;
+    this.dimensionality = dimensionality;
+    this.updateRules = updateRules;
+    this.structure = {};
+    this.initializeStructure();
+  }
+
+
+  initializeStructure() {
+    this.locations.forEach(location => {
+      this.structure[location] = {};
+      this.sides.forEach(side => {
+        this.structure[location][side] = this.dimensionality === 1 ? 0 : Array(12).fill(0);
+      });
+    });
+  }
+
+
+  addLesion(location, side, position = null) {
+    if (this.isValidLocation(location) && this.isValidSide(side)) {
+      if (this.dimensionality === 1) {
+        this.structure[location][side] += 1;
+      } else if (this.dimensionality === 2 && position !== null && position >= 1 && position <= 12) {
+        this.structure[location][side][position - 1] += 1;
+      }
+      if (this.updateRules) {
+        this.applyUpdateRules(location, side, position);
+      }
+    } else {
+      console.error('Invalid location or side');
+    }
+  }
+
+
+  applyUpdateRules(location, side, position) {
+    const locationsToUpdate = this.updateRules[location] || [];
+    locationsToUpdate.forEach(loc => {
+      if (this.dimensionality === 1) {
+        this.structure[loc][side] += 1;
+      } else if (this.dimensionality === 2 && position !== null) {
+        this.structure[loc][side][position - 1] += 1;
+      }
+    });
+  }
+
+
+  getValue(location, side, position = null) {
+    if (this.isValidLocation(location) && this.isValidSide(side)) {
+      if (this.dimensionality === 1) {
+        return this.structure[location][side];
+      } else if (this.dimensionality === 2 && position !== null) {
+        return this.structure[location][side][position - 1];
+      }
+    }
+    console.error('Invalid location or side');
+    return null;
+  }
+
+
+  getAllStructures() {
+    return this.structure;
+  }
+
+
+  getNonZeroStructures() {
+    return Object.fromEntries(
+      Object.entries(this.structure).flatMap(([location, sides]) =>
+        Object.entries(sides)
+          .filter(([_, value]) => this.dimensionality === 1 ? value > 0 : value.some(v => v > 0))
+          .map(([side, value]) => [`${location}-${side}`, value])
+      )
+    );
+  }
+
+
+  getTotalLesions() {
+    return Object.values(this.structure).reduce((sum, sides) =>
+      sum + Object.values(sides).reduce((sideSum, value) =>
+        sideSum + (this.dimensionality === 1 ? value : value.reduce((a, b) => a + b, 0)), 0), 0
+    );
+  }
+
+
+  getRegionStructures(region) {
+    const regionMap = {
+      'cervical': /^C/,
+      'thoracic': /^T/,
+      'lumbar': /^L/
+    };
+
+
+    if (!regionMap.hasOwnProperty(region)) {
+      console.error('Invalid region. Use "cervical", "thoracic", or "lumbar".');
+      return null;
+    }
+
+
+    return Object.fromEntries(
+      Object.entries(this.structure)
+        .filter(([key]) => regionMap[region].test(key))
+        .map(([key, value]) => [key, this.sides.length === 1 ? value[''] : value])
+    );
+  }
+
+
+  getSideStructures(side) {
+    if (this.isValidSide(side)) {
+      return Object.fromEntries(
+        Object.entries(this.structure).map(([location, sides]) => [location, sides[side]])
+      );
+    }
+    console.error('Invalid side');
+    return null;
+  }
+
+
+  isValidLocation(location) {
+    return this.locations.includes(location);
+  }
+
+
+  isValidSide(side) {
+    return this.sides.includes(side);
+  }
+
+
+  mergedText() {
+    // This method should be implemented in subclasses
+    return '';
+  }
+
+
+  arraysEqual(arr1, arr2) {
+    if (arr1.length !== arr2.length) return false;
+    return arr1.every((val, index) => val === arr2[index]);
+  }
+}
+class VertebralBodies extends AnatomicalStructure {
+
+
+  constructor() {
+    super(LOCATIONS.VERTEBRAE, SIDES.NONE);
+  }
+
+
+  parseLocationRange(locationInput) {
+    // 處理簡寫形式，如 'C1-5' 轉換為 'C1-C5'
+    locationInput = this.expandShorthandNotation(locationInput);
+
+
+    if (!locationInput.includes('-')) {
+      return [locationInput];
+    }
+
+
+    const [start, end] = locationInput.split('-');
+    const startIndex = this.locations.indexOf(start);
+    const endIndex = this.locations.indexOf(end);
+
+
+    if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) {
+      console.error(`Invalid location range: ${locationInput}; startIndex: ${startIndex}; endIndex: ${endIndex}`);
+      return [];
+    }
+
+
+    return this.locations.slice(startIndex, endIndex + 1);
+  }
+
+
+  expandShorthandNotation(input) {
+    const match = input.match(/^([CLT])(\d+)-(\d+)$/);
+    if (match) {
+      const [, prefix, start, end] = match;
+      return `${prefix}${start}-${prefix}${end}`;
+    }
+    return input;
+  }
+
+
+  addLesion(locationInput, side, position = null) {
+    const locations = this.parseLocationRange(locationInput);
+    
+    locations.forEach(location => {
+      if (this.isValidLocation(location)) {
+        super.addLesion(location, side, position);
+      } else {
+        console.error(`Invalid location: ${location}`);
+      }
+    });
+  }
+
+
+  mergedText() {
+    const nonZero = this.getNonZeroStructures();
+    const locations = Object.keys(nonZero).map(key => key.split('-')[0]);
+    const lesionCount = locations.length;
+    
+    if (lesionCount === 0) {
+      return "";
+    }
+    
+    const groupedLocations = this.groupConsecutiveLocations(locations);
+    const formattedLocations = groupedLocations.map(group => {
+      if (group.length === 1) {
+        return group[0];
+      } else {
+        return `${group[0]}-${group[group.length - 1]}`;
+      }
+    });
+    
+    return `${lesionCount > 1 ? 'vertebral bodies' : 'vertebral body'} of ${formattedLocations.join(', ')}`;
+  }
+
+
+  groupConsecutiveLocations(locations) {
+    const sorted = locations.sort((a, b) => {
+      const aMatch = a.match(/([CLT])(\d+)/);
+      const bMatch = b.match(/([CLT])(\d+)/);
+      if (aMatch[1] !== bMatch[1]) {
+        return aMatch[1].localeCompare(bMatch[1]);
+      }
+      return parseInt(aMatch[2]) - parseInt(bMatch[2]);
+    });
+
+
+    const groups = [];
+    let currentGroup = [sorted[0]];
+
+
+    for (let i = 1; i < sorted.length; i++) {
+      const current = sorted[i];
+      const prev = sorted[i - 1];
+      
+      const currentMatch = current.match(/([CLT])(\d+)/);
+      const prevMatch = prev.match(/([CLT])(\d+)/);
+      
+      if (currentMatch[1] === prevMatch[1] && 
+          parseInt(currentMatch[2]) === parseInt(prevMatch[2]) + 1) {
+        currentGroup.push(current);
+      } else {
+        groups.push(currentGroup);
+        currentGroup = [current];
+      }
+    }
+    
+    groups.push(currentGroup);
+    return groups;
+  }
+}
+
+
+
+
+class Endplates extends AnatomicalStructure {
+  constructor() {
+    super(LOCATIONS.INTERVERTEBRAL, SIDES.NONE);
+  }
+
+
+  expandShorthandNotation(input) {
+    const match = input.match(/^([CLT])(\d+)-(\d+)$/);
+    if (match) {
+      const [, prefix, start, end] = match;
+      return `${prefix}${start}-${prefix}${end}`;
+    }
+    return input;
+  }
+
+
+  addLesion(locationInput, side, position = null) {
+    locationInput = this.expandShorthandNotation(locationInput);
+    const [start, end] = locationInput.split('-');
+    
+    const vertebrae = LOCATIONS.VERTEBRAE;
+    const startIndex = vertebrae.indexOf(start);
+    const endIndex = vertebrae.indexOf(end);
+
+
+    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
+      console.error(`Invalid location range: ${locationInput}; startIndex: ${startIndex}; endIndex: ${endIndex}`);
+      return;
+    }
+
+
+    for (let i = startIndex; i < endIndex; i++) {
+      const intervertebral = `${vertebrae[i]}-${vertebrae[i+1]}`;
+      if (this.isValidLocation(intervertebral)) {
+        super.addLesion(intervertebral, side, position);
+      }
+    }
+  }
+
+
+  mergedText() {
+    const nonZero = this.getNonZeroStructures();
+    const locations = Object.keys(nonZero).map(key => key.split('-')[0]);
+    
+    if (locations.length === 0) {
+      return "";
+    }
+
+
+    const groupedLocations = this.groupConsecutiveLocations(locations);
+    const formattedLocations = groupedLocations.map(group => {
+      if (group.length === 1) {
+        return `${group[0]}-${this.getNextVertebra(group[0])}`;
+      } else {
+        return `${group[0]}-${this.getNextVertebra(group[group.length - 1])}`;
+      }
+    });
+
+
+    return `endplates of ${formattedLocations.join(', ')}`;
+  }
+
+
+  groupConsecutiveLocations(locations) {
+    const sorted = locations.sort((a, b) => {
+      const aMatch = a.match(/([CLT])(\d+)/);
+      const bMatch = b.match(/([CLT])(\d+)/);
+      if (aMatch[1] !== bMatch[1]) {
+        return aMatch[1].localeCompare(bMatch[1]);
+      }
+      return parseInt(aMatch[2]) - parseInt(bMatch[2]);
+    });
+
+
+    const groups = [];
+    let currentGroup = [sorted[0]];
+
+
+    for (let i = 1; i < sorted.length; i++) {
+      const current = sorted[i];
+      const prev = sorted[i - 1];
+      
+      if (this.getNextVertebra(prev) === current) {
+        currentGroup.push(current);
+      } else {
+        groups.push(currentGroup);
+        currentGroup = [current];
+      }
+    }
+    
+    groups.push(currentGroup);
+    return groups;
+  }
+
+
+  getNextVertebra(vertebra) {
+    const match = vertebra.match(/([CLT])(\d+)/);
+    if (match) {
+      const [, prefix, number] = match;
+      const nextNumber = parseInt(number) + 1;
+      if (prefix === 'C' && nextNumber > 7) {
+        return 'T1';
+      } else if (prefix === 'T' && nextNumber > 12) {
+        return 'L1';
+      } else if (prefix === 'L' && nextNumber > 5) {
+        return 'S1';
+      }
+      return `${prefix}${nextNumber}`;
+    }
+    return null;
+  }
+}
+
+
+
+
+
+
+
+
+class FacetJoints extends AnatomicalStructure {
+  constructor() {
+    super(LOCATIONS.INTERVERTEBRAL, SIDES.BILATERAL);
+  }
+
+
+  expandShorthandNotation(input) {
+    const match = input.match(/^([CLT])(\d+)-(\d+)$/);
+    if (match) {
+      const [, prefix, start, end] = match;
+      return `${prefix}${start}-${prefix}${end}`;
+    }
+    return input;
+  }
+
+
+  addLesion(locationInput, side, position = null) {
+    locationInput = this.expandShorthandNotation(locationInput);
+    const [start, end] = locationInput.split('-');
+    
+    const vertebrae = LOCATIONS.VERTEBRAE;
+    const startIndex = vertebrae.indexOf(start);
+    const endIndex = vertebrae.indexOf(end);
+
+
+    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
+      console.error(`Invalid location range: ${locationInput}; startIndex: ${startIndex}; endIndex: ${endIndex}`);
+      return;
+    }
+
+
+    for (let i = startIndex; i < endIndex; i++) {
+      const intervertebral = `${vertebrae[i]}-${vertebrae[i+1]}`;
+      if (this.isValidLocation(intervertebral)) {
+        if (side === 'bilateral' || side === '') {
+          super.addLesion(intervertebral, 'left', position);
+          super.addLesion(intervertebral, 'right', position);
+        } else {
+          super.addLesion(intervertebral, side, position);
+        }
+      }
+    }
+  }
+  
+  mergedText() {
+    const nonZero = this.getNonZeroStructures();
+    const locationsBySide = { left: [], right: [] };
+    for (const [key, value] of Object.entries(nonZero)) {
+      const side = key.includes('-right') ? 'right' : 'left';
+      const location = key.replace('-right', '').replace('-left', '');
+      if (side === 'left' || side === 'right') {
+        locationsBySide[side].push(location);
+      }
+    }
+
+
+    const { left, right } = locationsBySide;
+    if (left.length === 0 && right.length === 0) {
+      return '';
+    }
+
+
+    const mergeLocations = (locations) => {
+      const sorted = locations.sort();
+      const merged = [];
+      let current = sorted[0];
+      let isMerged = false;
+      for (let i = 1; i < sorted.length; i++) {
+        const [currentStart, currentEnd] = current.split('-');
+        const [nextStart, nextEnd] = sorted[i].split('-');
+        if (currentEnd === nextStart) {
+          current = `${currentStart}-${nextEnd}`;
+          isMerged = true;
+        } else {
+          merged.push(current);
+          current = sorted[i];
+        }
+      }
+      merged.push(current);
+      return { merged, isMerged };
+    };
+
+
+    const { merged: mergedLeft, isMerged: leftMerged } = mergeLocations(left);
+    const { merged: mergedRight, isMerged: rightMerged } = mergeLocations(right);
+
+
+    if (this.arraysEqual(mergedLeft.sort(), mergedRight.sort())) {
+      return `bilateral facet joint${mergedLeft.length > 1 || leftMerged ? 's' : ''} of ${mergedLeft.join(', ')}`;
+    }
+    
+    const parts = [];
+    if (mergedRight.length > 0) {
+      parts.push(`right facet joint${mergedRight.length > 1 || rightMerged ? 's' : ''} of ${mergedRight.join(', ')}`);
+    }
+    if (mergedLeft.length > 0) {
+      parts.push(`left facet joint${mergedLeft.length > 1 || leftMerged ? 's' : ''} of ${mergedLeft.join(', ')}`);
+    }
+    // 移除空白的描述
+    const filteredParts = parts.filter(part => !part.endsWith('of '));
+    return filteredParts.join(', ');
+  }
+}
+
+
+
+
+
+
+
+
+class CostochondralJunctions extends AnatomicalStructure {
+  constructor() {
+    super(LOCATIONS.RIBS, SIDES.BILATERAL);
+  }
+
+
+  expandRibRange(start, end) {
+    const ribIndices = LOCATIONS.RIBS.map(rib => parseInt(rib.match(/\d+/)[0]));
+    const startIndex = ribIndices.indexOf(parseInt(start.match(/\d+/)[0]));
+    const endIndex = ribIndices.indexOf(parseInt(end.match(/\d+/)[0]));
+
+
+    if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) {
+      console.error(`Invalid rib range: ${start}-${end}`);
+      return [];
+    }
+
+
+    return LOCATIONS.RIBS.slice(startIndex, endIndex + 1);
+  }
+
+
+  addLesion(locationInput, side, position = null) {
+    const [start, end] = locationInput.split('-');
+    const ribs = end ? this.expandRibRange(start, end) : [start];
+
+
+    ribs.forEach(rib => {
+      if (this.isValidLocation(rib)) {
+        if (side === 'bilateral' || side === '') {
+          super.addLesion(rib, 'left', position);
+          super.addLesion(rib, 'right', position);
+        } else {
+          super.addLesion(rib, side, position);
+        }
+      } else {
+        console.error(`Invalid rib: ${rib}`);
+      }
+    });
+  }
+  mergedText() {
+    const nonZero = this.getNonZeroStructures();
+    const locationsBySide = { left: [], right: [] };
+    for (const [key, value] of Object.entries(nonZero)) {
+      const [location, side] = key.split('-');
+      if (side === 'left' || side === 'right') {
+        locationsBySide[side].push(location);
+      }
+    }
+
+
+    const mergeLocations = (locations) => {
+      const sorted = locations.sort((a, b) => {
+        return parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]);
+      });
+      const merged = [];
+      let start = sorted[0];
+      let current = start;
+      for (let i = 1; i < sorted.length; i++) {
+        const currentNum = parseInt(current.match(/\d+/)[0]);
+        const nextNum = parseInt(sorted[i].match(/\d+/)[0]);
+        if (nextNum === currentNum + 1) {
+          current = sorted[i];
+        } else {
+          merged.push(start === current ? start : `${start.split(' ')[0]}-${current}`);
+          start = sorted[i];
+          current = sorted[i];
+        }
+      }
+      merged.push(start === current ? start : `${start.split(' ')[0]}-${current}`);
+      return locations.length > 0 ? merged : [];
+    };
+
+
+    const { left, right } = locationsBySide;
+    if (left.length === 0 && right.length === 0) {
+      return '';
+    }
+    const mergedLeft = mergeLocations(left);
+    const mergedRight = mergeLocations(right);
+
+
+    if (this.arraysEqual(mergedLeft.sort(), mergedRight.sort()) && mergedLeft.length > 0) {
+      return `bilateral ${mergedLeft.join(', ')} costochondral junctions`;
+    }
+    
+    const parts = [];
+    if (mergedRight.length > 0) {
+      parts.push(`right ${mergedRight.join(', ')}`);
+    }
+    if (mergedLeft.length > 0) {
+      parts.push(`left ${mergedLeft.join(', ')}`);
+    }
+
+
+    return `${parts.join(', ')} costochondral junction${left.length + right.length > 1 ? 's' : ''}`;
+  }
+
+
+  // mergedText() {
+  //   const nonZero = this.getNonZeroStructures();
+  //   const locationsBySide = { left: [], right: [] };
+  //   for (const [key, value] of Object.entries(nonZero)) {
+  //     const [location, side] = key.split('-');
+  //     if (side === 'left' || side === 'right') {
+  //       locationsBySide[side].push(location);
+  //     }
+  //   }
+
+
+  //   const mergeLocations = (locations) => {
+  //     const sorted = locations.sort((a, b) => {
+  //       return parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]);
+  //     });
+  //     const merged = [];
+  //     let current = sorted[0];
+  //     for (let i = 1; i < sorted.length; i++) {
+  //       const currentNum = parseInt(current.match(/\d+/)[0]);
+  //       const nextNum = parseInt(sorted[i].match(/\d+/)[0]);
+  //       if (nextNum === currentNum + 1) {
+  //         current = `${current.split(' ')[0]}-${sorted[i]}`;
+  //       } else {
+  //         merged.push(current);
+  //         current = sorted[i];
+  //       }
+  //     }
+  //     merged.push(current);
+  //     return locations.length > 0 ? merged : [];
+  //   };
+
+
+  //   const { left, right } = locationsBySide;
+  //   if (left.length === 0 && right.length === 0) {
+  //     return '';
+  //   }
+  //   const mergedLeft = mergeLocations(left);
+  //   const mergedRight = mergeLocations(right);
+
+
+  //   if (this.arraysEqual(mergedLeft.sort(), mergedRight.sort()) && mergedLeft.length > 0) {
+  //     return `bilateral ${mergedLeft.join(', ')} costochondral junctions`;
+  //   }
+    
+  //   const parts = [];
+  //   if (mergedRight.length > 0) {
+  //     parts.push(`right ${mergedRight.join(', ')}`);
+  //   }
+  //   if (mergedLeft.length > 0) {
+  //     parts.push(`left ${mergedLeft.join(', ')}`);
+  //   }
+
+
+  //   return `${parts.join(', ')} costochondral junction${left.length + right.length > 1 ? 's' : ''}`;
+  // }
+}
+
+
+
+
+class CostovertebralJoints extends AnatomicalStructure {
+  constructor() {
+    super(LOCATIONS.RIBS, SIDES.BILATERAL);
+  }
+
+
+  expandRibRange(start, end) {
+    const ribIndices = LOCATIONS.RIBS.map(rib => parseInt(rib.match(/\d+/)[0]));
+    const startIndex = ribIndices.indexOf(parseInt(start.match(/\d+/)[0]));
+    const endIndex = ribIndices.indexOf(parseInt(end.match(/\d+/)[0]));
+
+
+    if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) {
+      console.error(`Invalid rib range: ${start}-${end}`);
+      return [];
+    }
+
+
+    return LOCATIONS.RIBS.slice(startIndex, endIndex + 1);
+  }
+
+
+  addLesion(locationInput, side, position = null) {
+    const [start, end] = locationInput.split('-');
+    const ribs = end ? this.expandRibRange(start, end) : [start];
+
+
+    ribs.forEach(rib => {
+      if (this.isValidLocation(rib)) {
+        if (side === 'bilateral' || side === '') {
+          super.addLesion(rib, 'left', position);
+          super.addLesion(rib, 'right', position);
+        } else {
+          super.addLesion(rib, side, position);
+        }
+      } else {
+        console.error(`Invalid rib: ${rib}`);
+      }
+    });
+  }
+  mergedText() {
+    const nonZero = this.getNonZeroStructures();
+    const locationsBySide = { left: [], right: [] };
+    for (const [key, value] of Object.entries(nonZero)) {
+      const [location, side] = key.split('-');
+      if (side === 'left' || side === 'right') {
+        locationsBySide[side].push(location);
+      }
+    }
+
+
+    const mergeLocations = (locations) => {
+      const sorted = locations.sort((a, b) => {
+        return parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]);
+      });
+      const merged = [];
+      let start = sorted[0];
+      let current = start;
+      for (let i = 1; i < sorted.length; i++) {
+        const currentNum = parseInt(current.match(/\d+/)[0]);
+        const nextNum = parseInt(sorted[i].match(/\d+/)[0]);
+        if (nextNum === currentNum + 1) {
+          current = sorted[i];
+        } else {
+          merged.push(start === current ? start : `${start.split(' ')[0]}-${current}`);
+          start = sorted[i];
+          current = sorted[i];
+        }
+      }
+      merged.push(start === current ? start : `${start.split(' ')[0]}-${current}`);
+      return locations.length > 0 ? merged : []
+    };
+
+
+    const { left, right } = locationsBySide;
+    if (left.length === 0 && right.length === 0) {
+      return '';
+    }
+
+
+    const mergedLeft = mergeLocations(left);
+    const mergedRight = mergeLocations(right);
+
+
+    if (this.arraysEqual(mergedLeft.sort(), mergedRight.sort()) && mergedLeft.length > 0) {
+      return `bilateral ${mergedLeft.join(', ')} costovertebral joints`;
+    }
+    
+    const parts = [];
+    if (mergedRight.length > 0) {
+      parts.push(`right ${mergedRight.join(', ')}`);
+    }
+    if (mergedLeft.length > 0) {
+      parts.push(`left ${mergedLeft.join(', ')}`);
+    }
+    return `${parts.join(', ')} costovertebral joint${left.length + right.length > 1 ? 's' : ''}`;
+  }
+
+
+}
+
+
+class CostosternalJoints extends AnatomicalStructure {
+  constructor() {
+    super(LOCATIONS.RIBS, SIDES.BILATERAL);
+  }
+
+
+  expandRibRange(start, end) {
+    const ribIndices = LOCATIONS.RIBS.map(rib => parseInt(rib.match(/\d+/)[0]));
+    const startIndex = ribIndices.indexOf(parseInt(start.match(/\d+/)[0]));
+    const endIndex = ribIndices.indexOf(parseInt(end.match(/\d+/)[0]));
+
+
+    if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) {
+      console.error(`Invalid rib range: ${start}-${end}`);
+      return [];
+    }
+
+
+    return LOCATIONS.RIBS.slice(startIndex, endIndex + 1);
+  }
+
+
+  addLesion(locationInput, side, position = null) {
+    const [start, end] = locationInput.split('-');
+    const ribs = end ? this.expandRibRange(start, end) : [start];
+
+
+    ribs.forEach(rib => {
+      if (this.isValidLocation(rib)) {
+        if (side === 'bilateral' || side === '') {
+          super.addLesion(rib, 'left', position);
+          super.addLesion(rib, 'right', position);
+        } else {
+          super.addLesion(rib, side, position);
+        }
+      } else {
+        console.error(`Invalid rib: ${rib}`);
+      }
+    });
+  }
+  mergedText() {
+    const nonZero = this.getNonZeroStructures();
+    const locationsBySide = { left: [], right: [] };
+    for (const [key, value] of Object.entries(nonZero)) {
+      const [location, side] = key.split('-');
+      if (side === 'left' || side === 'right') {
+        locationsBySide[side].push(location);
+      }
+    }
+
+
+    const mergeLocations = (locations) => {
+      const sorted = locations.sort((a, b) => {
+        return parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]);
+      });
+      const merged = [];
+      let start = sorted[0];
+      let current = start;
+      for (let i = 1; i < sorted.length; i++) {
+        const currentNum = parseInt(current.match(/\d+/)[0]);
+        const nextNum = parseInt(sorted[i].match(/\d+/)[0]);
+        if (nextNum === currentNum + 1) {
+          current = sorted[i];
+        } else {
+          merged.push(start === current ? start : `${start.split(' ')[0]}-${current}`);
+          start = sorted[i];
+          current = sorted[i];
+        }
+      }
+      merged.push(start === current ? start : `${start.split(' ')[0]}-${current}`);
+      return locations.length > 0 ? merged : []
+    };
+
+
+    const { left, right } = locationsBySide;
+    if (left.length === 0 && right.length === 0) {
+      return '';
+    }
+
+
+    const mergedLeft = mergeLocations(left);
+    const mergedRight = mergeLocations(right);
+
+
+    if (this.arraysEqual(mergedLeft.sort(), mergedRight.sort()) && mergedLeft.length > 0) {
+      return `bilateral ${mergedLeft.join(', ')} costosternal joints`;
+    }
+    
+    const parts = [];
+    if (mergedRight.length > 0) {
+      parts.push(`right ${mergedRight.join(', ')}`);
+    }
+    if (mergedLeft.length > 0) {
+      parts.push(`left ${mergedLeft.join(', ')}`);
+    }
+    return `${parts.join(', ')} costosternal joint${left.length + right.length > 1 ? 's' : ''}`;
+  }
+
+
+}
+
+
+class Ribs extends AnatomicalStructure {
+  constructor() {
+    const updateRules = {
+      'anterior': ['anterior', 'anterolateral', ''],
+      'lateral': ['lateral', 'anterolateral', 'posterolateral', ''],
+      'posterior': ['posterior', 'posterolateral', ''],
+      'anterolateral': ['anterolateral', ''],
+      'posterolateral': ['posterolateral', ''],
+      '': ['']
+    };
+    super(LOCATIONS.RIB_REGIONS, SIDES.BILATERAL, 2, updateRules);
+  }
+
+
+  get DESCRIPTION_ORDER() {
+    return ['', 'anterior', 'anterolateral', 'lateral', 'posterolateral', 'posterior'];
+  }
+
+
+  get BILATERAL_LOCATIONS() {
+    return ['anterior', 'posterior', 'lateral'];
+  }
+
+
+  addLesion(location, side, ribNumber) {
+    if (this.isValidLocation(location) && this.isValidSide(side) && ribNumber >= 1 && ribNumber <= 12) {
+      const locationsToUpdate = this.updateRules[location] || [];
+      locationsToUpdate.forEach(loc => {
+        this.structure[loc][side][ribNumber - 1] += 1;
+      });
+    } else {
+      console.error('Invalid add parameters');
+    }
+  }
+
+
+  parseRibRange(start, end = null) {
+    const startNum = this.parseRibNumber(start);
+    const endNum = end ? this.parseRibNumber(end) : startNum;
+    return Array.from({length: endNum - startNum + 1}, (_, i) => startNum + i);
+  }
+
+
+  parseRibNumber(rib) {
+    if (typeof rib === 'number') {
+      return rib;
+    }
+    const match = rib.match(/(\d+)(?:st|nd|rd|th)?/);
+    return match ? parseInt(match[1]) : NaN;
+  }
+
+
+  parseRibNumber(rib) {
+    if (typeof rib === 'number') {
+      return rib;
+    }
+    const match = rib.match(/(\d+)(?:st|nd|rd|th)?/);
+    return match ? parseInt(match[1]) : NaN;
+  }
+
+
+  mergedText() {
+    let descriptions = [];
+    let usedRibs = new Set();
+
+
+    // 检查是否有 '' (general) 病灶
+    let generalLesions = this.getGeneralLesions();
+    if (generalLesions.length > 0) {
+      descriptions.push(this.formatGeneralLesions(generalLesions));
+      generalLesions.forEach(rib => usedRibs.add(`${rib.side}-${rib.number}`));
+    }
+
+
+    if (this.shouldUseAnterolateral() && this.shouldUsePosterolateral()) {
+      // 同时使用 anterolateral 和 posterolateral
+      let anterolateralRibs = this.combineAnterolateralLesions();
+      let posterolateralRibs = this.combinePosterolateralLesions();
+
+
+      anterolateralRibs = this.filterUsedRibs(anterolateralRibs, usedRibs);
+      posterolateralRibs = this.filterUsedRibs(posterolateralRibs, usedRibs);
+
+
+      if (anterolateralRibs.length > 0) {
+        descriptions.push(this.formatAspectDescription('anterolateral', anterolateralRibs));
+        this.markRibsAsUsed(anterolateralRibs, usedRibs);
+      }
+      if (posterolateralRibs.length > 0) {
+        descriptions.push(this.formatAspectDescription('posterolateral', posterolateralRibs));
+        this.markRibsAsUsed(posterolateralRibs, usedRibs);
+      }
+    } else if (this.shouldUseAnterolateral()) {
+      // 只使用 anterolateral
+      let anterolateralRibs = this.combineAnterolateralLesions();
+      let posteriorRibs = this.combineRibs('posterior');
+
+
+      anterolateralRibs = this.filterUsedRibs(anterolateralRibs, usedRibs);
+      posteriorRibs = this.filterUsedRibs(posteriorRibs, usedRibs);
+
+
+      if (anterolateralRibs.length > 0) {
+        descriptions.push(this.formatAspectDescription('anterolateral', anterolateralRibs));
+        this.markRibsAsUsed(anterolateralRibs, usedRibs);
+      }
+      if (posteriorRibs.length > 0) {
+        descriptions.push(this.formatAspectDescription('posterior', posteriorRibs));
+        this.markRibsAsUsed(posteriorRibs, usedRibs);
+      }
+    } else if (this.shouldUsePosterolateral()) {
+      // 只使用 posterolateral
+      let anteriorRibs = this.combineRibs('anterior');
+      let posterolateralRibs = this.combinePosterolateralLesions();
+
+
+      anteriorRibs = this.filterUsedRibs(anteriorRibs, usedRibs);
+      posterolateralRibs = this.filterUsedRibs(posterolateralRibs, usedRibs);
+
+
+      if (anteriorRibs.length > 0) {
+        descriptions.push(this.formatAspectDescription('anterior', anteriorRibs));
+        this.markRibsAsUsed(anteriorRibs, usedRibs);
+      }
+      if (posterolateralRibs.length > 0) {
+        descriptions.push(this.formatAspectDescription('posterolateral', posterolateralRibs));
+        this.markRibsAsUsed(posterolateralRibs, usedRibs);
+      }
+    } else {
+  // 处理所有其他情况
+  let locations = ['anterior', 'lateral', 'posterior'];
+  locations.forEach(location => {
+    let ribs = this.combineRibs(location);
+    if (ribs.length > 0) {
+      descriptions.push(this.formatAspectDescription(location, ribs));
+    }
+  });
+}
+
+
+  return this.combineDescriptions(descriptions);
+}
+
+
+combineAnterolateralLesions() {
+  let combined = [];
+  ['left', 'right'].forEach(side => {
+    this.structure['anterolateral'][side].forEach((value, index) => {
+      let count = Math.max(
+        value,
+        this.structure['anterior'][side][index],
+        this.structure['lateral'][side][index],
+        this.structure['anterolateral'][side][index]
+      );
+      if (count > 0) {
+        combined.push({ side, number: index + 1, count });
+      }
+    });
+  });
+  return combined;
+}
+
+
+combinePosterolateralLesions() {
+  let combined = [];
+  ['left', 'right'].forEach(side => {
+    this.structure['posterolateral'][side].forEach((value, index) => {
+      let count = Math.max(
+        value,
+        this.structure['posterior'][side][index],
+        this.structure['lateral'][side][index],
+        this.structure['posterolateral'][side][index]
+      );
+      if (count > 0) {
+        combined.push({ side, number: index + 1, count });
+      }
+    });
+  });
+  return combined;
+}
+
+
+filterUsedRibs(ribs, usedRibs) {
+  return ribs.filter(rib => !usedRibs.has(`${rib.side}-${rib.number}`));
+}
+
+
+markRibsAsUsed(ribs, usedRibs) {
+  ribs.forEach(rib => usedRibs.add(`${rib.side}-${rib.number}`));
+}
+
+
+formatAspectDescription(aspect, ribs) {
+  let ribsDescription = this.formatRibsWithSides(ribs);
+  let ribWord = ribs.length > 1 || (ribs[0].start !== ribs[0].end) ? 'ribs' : 'rib';
+  return `${aspect} aspect of ${ribsDescription} ${ribWord}`;
+}
+
+
+
+
+formatLocations(locations) {
+  if (locations.length === 1) {
+    return `${locations[0]} aspect`;
+  } else if (locations.length === 2) {
+    return `${locations[0]} and ${locations[1]} aspects`;
+  } else {
+    let lastLocation = locations.pop();
+    return `${locations.join(', ')}, and ${lastLocation} aspects`;
+  }
+}
+
+
+
+
+
+
+
+
+  getGeneralLesions() {
+    let generalLesions = [];
+    ['left', 'right'].forEach(side => {
+      this.structure[''][side].forEach((value, index) => {
+        if (value > 0 &&
+          value > (this.structure['anterolateral'][side][index] + this.structure['posterior'][side][index]) &&
+          value > (this.structure['anterior'][side][index] + this.structure['posterolateral'][side][index])) {
+          generalLesions.push({ side, number: index + 1, count: value });
+        }
+      });
+    });
+    return generalLesions;
+  }
+
+
+  shouldUseAnterolateral() {
+    return ['left', 'right'].some(side =>
+      this.structure['anterolateral'][side].some((value, index) =>
+        value > (this.structure['anterior'][side][index] + this.structure['lateral'][side][index])
+      )
+    );
+  }
+
+
+  shouldUsePosterolateral() {
+    return ['left', 'right'].some(side =>
+      this.structure['posterolateral'][side].some((value, index) =>
+        value > (this.structure['posterior'][side][index] + this.structure['lateral'][side][index])
+      )
+    );
+  }
+  combineAnteriorLateralLesions() {
+    let combined = [];
+    ['left', 'right'].forEach(side => {
+      this.structure['anterolateral'][side].forEach((value, index) => {
+        let count = Math.max(
+          value,
+          this.structure['anterior'][side][index],
+          this.structure['lateral'][side][index],
+          this.structure['anterolateral'][side][index]
+        );
+        if (count > 0) {
+          combined.push({ side, number: index + 1, count });
+        }
+      });
+    });
+    return combined;
+  }
+
+
+  combinePosteriorLateralLesions() {
+    let combined = [];
+    ['left', 'right'].forEach(side => {
+      this.structure['posterolateral'][side].forEach((value, index) => {
+        let count = Math.max(
+          value,
+          this.structure['posterior'][side][index],
+          this.structure['lateral'][side][index],
+          this.structure['posterolateral'][side][index]
+        );
+        if (count > 0) {
+          combined.push({ side, number: index + 1, count });
+        }
+      });
+    });
+    return combined;
+  }
+
+
+  combineRibs(location) {
+    let combined = [];
+    ['left', 'right'].forEach(side => {
+      this.structure[location][side].forEach((value, index) => {
+        if (value > 0) {
+          let existingRib = combined.find(rib => rib.side === side && rib.number === index + 1);
+          if (existingRib) {
+            existingRib.count += value;
+          } else {
+            combined.push({ side, number: index + 1, count: value });
+          }
+        }
+      });
+    });
+    return combined;
+  }
+
+
+
+
+formatGeneralLesions(lesions) {
+  let formattedRibs = this.formatRibsWithSides(lesions);
+  let ribWord = lesions.length > 1 ? 'ribs' : 'rib';
+  return `${formattedRibs} ${ribWord}`;
+}
+
+
+getGeneralLesions() {
+  let generalLesions = [];
+  ['left', 'right'].forEach(side => {
+    this.structure[''][side].forEach((value, index) => {
+      if (value > 0 &&
+        value > (this.structure['anterolateral'][side][index] + this.structure['posterior'][side][index]) &&
+        value > (this.structure['anterior'][side][index] + this.structure['posterolateral'][side][index])) {
+        generalLesions.push({ side, number: index + 1, count: value, start: index + 1, end: index + 1 });
+      }
+    });
+  });
+  return generalLesions;
+}
+
+
+
+
+  formatRibsWithSides(ribs) {
+    let leftRibs = ribs.filter(rib => rib.side === 'left').map(rib => ({ number: rib.number, count: rib.count }));
+    let rightRibs = ribs.filter(rib => rib.side === 'right').map(rib => ({ number: rib.number, count: rib.count }));
+
+
+    // 檢查左右側是否完全相同
+    let isBilateral = JSON.stringify(leftRibs) === JSON.stringify(rightRibs);
+
+
+    if (isBilateral && leftRibs.length > 0) {
+      // 如果是雙側的，只需要描述一次
+      return `bilateral ${this.formatRibNumbers(leftRibs)}`;
+    } else {
+      // 如果不是雙側的，分別描述左右側
+      let description = [];
+      if (rightRibs.length > 0) {
+        description.push(`right ${this.formatRibNumbers(rightRibs)}`);
+      }
+      if (leftRibs.length > 0) {
+        description.push(`left ${this.formatRibNumbers(leftRibs)}`);
+      }
+      return description.join(', ');
+    }
+  }
+
+
+  formatRibNumbers(ribs) {
+    // 將連續的肋骨數字組合起來
+    let groups = [];
+    let current = null;
+    
+    ribs.sort((a, b) => a.number - b.number).forEach(rib => {
+      if (!current || rib.number !== current.end + 1) {
+        current = { start: rib.number, end: rib.number, count: rib.count };
+        groups.push(current);
+      } else {
+        current.end = rib.number;
+        current.count = Math.max(current.count, rib.count);
+      }
+    });
+
+
+    // 格式化每組肋骨
+    return groups.map(group => {
+      let ribDesc = group.start === group.end ? 
+        this.getOrdinal(group.start) : 
+        `${this.getOrdinal(group.start)}-${this.getOrdinal(group.end)}`;
+      return group.count > 1 ? `${ribDesc} (${group.count})` : ribDesc;
+    }).join(', ');
+  }
+
+
+
+
+  formatRib(rib) {
+    return `${this.getOrdinal(rib.number)}${rib.count > 1 ? ` (${rib.count})` : ''}`;
+  }
+
+
+
+
+combineDescriptions(descriptions) {
+  let combinedDescriptions = {};
+
+
+  descriptions.forEach(desc => {
+    let match = desc.match(/^(\w+(?:\s+\w+)*) aspect of (.+)$/);
+    if (match) {
+      let [_, aspect, ribDesc] = match;
+      if (combinedDescriptions[ribDesc]) {
+        combinedDescriptions[ribDesc].push(aspect);
+      } else {
+        combinedDescriptions[ribDesc] = [aspect];
+      }
+    } else {
+      // 如果不匹配這個模式（例如一般性病灶的描述），直接添加
+      combinedDescriptions[desc] = null;
+    }
+  });
+
+
+  let finalDescriptions = [];
+  for (let [ribDesc, aspects] of Object.entries(combinedDescriptions)) {
+    if (aspects === null) {
+      finalDescriptions.push(ribDesc);
+    } else if (aspects.length > 1) {
+      finalDescriptions.push(`${this.formatAspects(aspects)} aspects of ${ribDesc}`);
+    } else {
+      finalDescriptions.push(`${aspects[0]} aspect of ${ribDesc}`);
+    }
+  }
+
+
+  // 最終組合所有描述
+  if (finalDescriptions.length === 1) {
+    return finalDescriptions[0];
+  } else if (finalDescriptions.length === 2) {
+    return finalDescriptions.join(' and ');
+  } else {
+    let last = finalDescriptions.pop();
+    return `${finalDescriptions.join(', ')}, and ${last}`;
+  }
+}
+
+
+formatAspects(aspects) {
+  if (aspects.length === 1) {
+    return aspects[0];
+  } else if (aspects.length === 2) {
+    return `${aspects[0]} and ${aspects[1]}`;
+  } else {
+    let last = aspects.pop();
+    return `${aspects.join(', ')}, and ${last}`;
+  }
+}
+
+
+
+
+  getOrdinal(n) {
+    const suffixes = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
+  }
+
+
+  isBilateral() {
+    return Object.keys(this.structure).every(location =>
+      this.arraysEqual(this.structure[location]['left'], this.structure[location]['right'])
+    );
+  }
+
+
+  arraysEqual(arr1, arr2) {
+    return arr1.every((val, index) => val === arr2[index]);
+  }
+}
+
+
+class VertebralLevels extends AnatomicalStructure {
+  constructor() {
+    super(LOCATIONS.VERTEBRAE.concat(LOCATIONS.INTERVERTEBRAL), SIDES.NONE);
+  }
+
+
+  parseLocationRange(locationInput) {
+    // 处理简写形式，如 'C1-5' 转换为 'C1-C5'
+    locationInput = this.expandShorthandNotation(locationInput);
+
+
+    if (!locationInput.includes('-')) {
+      return [locationInput];
+    }
+
+
+    const [start, end] = locationInput.split('-');
+    
+    // 如果是相邻椎骨对（如 'C1-C2'），且在有效列表中，直接返回
+    if (this.isValidLocation(locationInput)) {
+      return [locationInput];
+    }
+
+
+    const startIndex = this.locations.indexOf(start);
+    const endIndex = this.locations.indexOf(end);
+
+
+    if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) {
+      console.error(`Invalid location range: ${locationInput}; startIndex: ${startIndex}; endIndex: ${endIndex}`);
+      return [];
+    }
+
+
+    return this.locations.slice(startIndex, endIndex + 1);
+  }
+
+
+  expandShorthandNotation(input) {
+    const match = input.match(/^([CLT])(\d+)-(\d+)$/);
+    if (match) {
+      const [, prefix, start, end] = match;
+      return `${prefix}${start}-${prefix}${end}`;
+    }
+    return input;
+  }
+
+
+  addLesion(locationInput, side, position = null) {
+    const locations = this.parseLocationRange(locationInput);
+    
+    locations.forEach(location => {
+      if (this.isValidLocation(location)) {
+        super.addLesion(location, side, position);
+      } else {
+        console.error(`Invalid location: ${location}`);
+      }
+    });
+  }
+
+
+  // mergedText() {
+  //   const nonZero = this.getNonZeroStructures();
+  //   const locations = Object.keys(nonZero).map(key => key.replace(/-$/, '')); // 移除末尾的连字符
+  //   return locations.sort(this.compareLocations).join(', ');
+  // }
+  mergedText() {
+    const nonZero = this.getNonZeroStructures();
+    const locations = Object.keys(nonZero).map(key => key.replace(/-$/, '')); // 移除末尾的连字符
+    const sortedLocations = locations.sort(this.compareLocations);
+    
+    let result = [];
+    let currentGroup = [];
+
+
+    for (let i = 0; i < sortedLocations.length; i++) {
+      const current = sortedLocations[i];
+      const next = sortedLocations[i + 1];
+
+
+      if (current.includes('-')) {
+        // 如果是椎间结构，直接添加
+        this.addGroupToResult(currentGroup, result);
+        result.push(current);
+        currentGroup = [];
+      } else {
+        if (currentGroup.length === 0 || this.isConsecutive(currentGroup[currentGroup.length - 1], current)) {
+          currentGroup.push(current);
+        } else {
+          this.addGroupToResult(currentGroup, result);
+          currentGroup = [current];
+        }
+
+
+        if (!next || !this.isConsecutive(current, next)) {
+          this.addGroupToResult(currentGroup, result);
+          currentGroup = [];
+        }
+      }
+    }
+
+
+    return result.join(', ');
+  }
+
+
+  addGroupToResult(group, result) {
+    if (group.length >= 2) {
+      result.push(`${group[0]}-${group[group.length - 1]}`);
+    } else if (group.length === 1) {
+      result.push(group[0]);
+    }
+  }
+
+
+  isConsecutive(a, b) {
+    const prefixOrder = { 'C': 1, 'T': 2, 'L': 3, 'S': 4 };
+    const aPrefix = a.charAt(0);
+    const bPrefix = b.charAt(0);
+    const aNum = parseInt(a.match(/\d+/)[0]);
+    const bNum = parseInt(b.match(/\d+/)[0]);
+
+
+    if (aPrefix === bPrefix) {
+      return bNum - aNum === 1;
+    } else {
+      return prefixOrder[bPrefix] - prefixOrder[aPrefix] === 1 && 
+            ((aPrefix === 'C' && aNum === 7 && bNum === 1) ||
+              (aPrefix === 'T' && aNum === 12 && bNum === 1) ||
+              (aPrefix === 'L' && aNum === 5 && bNum === 1));
+    }
+  }
+
+
+  compareLocations(a, b) {
+    const prefixOrder = { 'C': 1, 'T': 2, 'L': 3, 'S': 4 };
+    
+    const aPrefix = a.charAt(0);
+    const bPrefix = b.charAt(0);
+    if (aPrefix !== bPrefix) {
+      return prefixOrder[aPrefix] - prefixOrder[bPrefix];
+    }
+    const aNum = parseInt(a.match(/\d+/)[0]);
+    const bNum = parseInt(b.match(/\d+/)[0]);
+    if (aNum !== bNum) return aNum - bNum;
+    return a.length - b.length; // 确保 C1 在 C1-C2 之前
+  }
+
+
+  //
+  compareLocations(a, b) {
+    const prefixOrder = { 'C': 1, 'T': 2, 'L': 3 , 'S': 4};
+    
+    const aPrefix = a.charAt(0);
+    const bPrefix = b.charAt(0);
+    if (aPrefix !== bPrefix) {
+      return prefixOrder[aPrefix] - prefixOrder[bPrefix];
+    }
+    const aNum = parseInt(a.match(/\d+/)[0]);
+    const bNum = parseInt(b.match(/\d+/)[0]);
+    if (aNum !== bNum) return aNum - bNum;
+    return a.length - b.length; // 确保 C1 在 C1-C2 之前
+  }
+}
+
+
+
+
+
+
+function getSelectedRowIndices() {
+  const recordsSheet = AppConfig.getSheet('RECORDS');
+  var selectedRanges = recordsSheet.getActiveRangeList().getRanges();
+  
+  // 使用 Set 來存儲唯一的行索引
+  var rowIndicesSet = new Set();
+  
+  selectedRanges.forEach(function(range) {
+    var startRow = range.getRow();
+    var endRow = startRow + range.getNumRows() - 1;
+    
+    // 直接添加範圍內的所有行索引到 Set
+    for (var i = startRow; i <= endRow; i++) {
+      rowIndicesSet.add(i);
+    }
+  });
+  
+  // 將 Set 轉換為排序後的數組
+  var rowIndices = Array.from(rowIndicesSet).sort((a, b) => a - b);
+  return rowIndices;
+}
+
+
+function capitalizeFirstLetter(str) {
+  // 檢查字串是否為空
+  if (!str || str.length === 0) return str;
+  
+  // 使用正則表達式檢查第一個字符是否為英文字母
+  if (/^[a-zA-Z]/.test(str)) {
+    // 如果是英文字母，將第一個字符轉換為大寫，並與剩餘的字串連接
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+  
+  // 如果第一個字符不是英文字母，直接返回原字串
+  return str;
+}
+
+
+
+
+function mergeLesionsAnatomies(lesions) {
+  let newLesions = [];
+  let ribs = new Ribs();
+  let vertebralBodies = new VertebralBodies();
+  let vertebralLevels = new VertebralLevels();
+  let endplates = new Endplates();
+  let facetJoints = new FacetJoints();
+  let costochondralJunctions = new CostochondralJunctions();
+  let costovertebralJoints = new CostovertebralJoints();
+  let costosternalJoints = new CostosternalJoints();
+  let bilaterRibsReduction = false;
+  let rightRibsReduction = false;
+  let leftRibsReduction = false;
+
+
+  let lateralLesions = {};
+  let bilateralLesions = new Set();
+
+
+  function simplePluralize(word) {
+    // 检查是否有特殊的复数形式
+    const specialPlural = AppConfig.applyPluralExceptions(word.toLowerCase());
+    if (specialPlural !== word.toLowerCase()) {
+      // 如果有特殊形式，保持原单词的大小写
+      return word.charAt(0).toUpperCase() + specialPlural.slice(1);
+    }
+    // 否则，简单地加 's'
+    return word + 's';
+  }
+
+
+  lesions.forEach(lesion => { 
+  
+    if (lesion.includes('rib')) {
+      if (!newLesions.includes('{ribs}')) {
+        newLesions.push('{ribs}')
+      }
+      let aspect = LOCATIONS.RIB_REGIONS
+        .filter(i => ` ${lesion}`.includes(` ${i}`))
+        .reduce((longest, current) => current.length > longest.length ? current : longest, '');
+      let side = ['left', 'right', 'bilateral'].filter(i => lesion.includes(i));
+
+
+      side = side.length > 0 ? side[side.length - 1] : '';
+
+
+      const ribMatch = lesion.match(/(\d+)(?:st|nd|rd|th)?(?:-(\d+)(?:st|nd|rd|th)?)?/);
+      if (ribMatch) {
+        const start = parseInt(ribMatch[1]);
+        const end = ribMatch[2] ? parseInt(ribMatch[2]) : start;
+        
+        for (let i = start; i <= end; i++) {
+          if (i >= 1 && i <= 12) {
+            if (side === '') {
+              bilaterRibsReduction = true;
+            } else if (side === 'bilateral') {
+              ribs.addLesion(aspect, 'left', i);
+              ribs.addLesion(aspect, 'right', i);
+            } else {
+              ribs.addLesion(aspect, side, i);
+            }
+          }
+        }
+      } else {
+        if (side === '') {
+          bilaterRibsReduction = true;
+        } else if (side === 'left') {
+          leftRibsReduction = true;
+        } else if (side === 'right') {
+          rightRibsReduction = true;
+        } else {
+          bilaterRibsReduction = true;
+        }
+      }
+    } else if (lesion.includes('vertebral bod')) {
+      if (!newLesions.includes('{vertebralBodies}')) {
+        newLesions.push('{vertebralBodies}');
+      }
+      const match = lesion.match(/([CTLS])(\d+)(?:-([CTLS])?(\d+))?/);
+      if (match) {
+        const startPrefix = match[1];
+        const startNumber = match[2];
+        const endPrefix = match[3] || startPrefix;
+        const endNumber = match[4] || startNumber;
+        vertebralBodies.addLesion(`${startPrefix}${startNumber}-${endPrefix}${endNumber}`, "");
+      }
+    } else if (lesion.includes('endplate')) {
+      if (!newLesions.includes('{endplates}')) {
+        newLesions.push('{endplates}')
+      }
+      const match = lesion.match(/([CTLS])(\d+)(?:-([CTLS])?(\d+))?/);
+      if (match) {
+        const startPrefix = match[1];
+        const startNumber = match[2];
+        const endPrefix = match[3] || startPrefix;
+        const endNumber = match[4] || startNumber;
+        endplates.addLesion(`${startPrefix}${startNumber}-${endPrefix}${endNumber}`, "");
+      }
+    } else if (lesion.includes('facet')) {
+      if (!newLesions.includes('{facetJoints}')) {
+        newLesions.push('{facetJoints}')
+      }
+      const match = lesion.match(/([CTLS])(\d+)(?:-([CTLS])?(\d+))?/);
+      let side = ['left', 'right', 'bilateral'].find(s => lesion.includes(s)) || 'bilateral';
+      if (match) {
+        const startPrefix = match[1];
+        const startNumber = match[2];
+        const endPrefix = match[3] || startPrefix;
+        const endNumber = match[4] || startNumber;
+        facetJoints.addLesion(`${startPrefix}${startNumber}-${endPrefix}${endNumber}`, side);
+      }
+    } else if (lesion.includes('costochondral')) {
+      if (!newLesions.includes('{costochondralJunctions}')) {
+        newLesions.push('{costochondralJunctions}')
+      }
+      const match = lesion.match(/(\d+)(?:st|nd|rd|th)?(?:-(\d+)(?:st|nd|rd|th)?)?/);
+      let side = ['left', 'right', 'bilateral'].find(s => lesion.includes(s)) || 'bilateral';
+      if (match) {
+        const start = parseInt(match[1]);
+        const end = match[2] ? parseInt(match[2]) : start;
+        for (let i = start; i <= end; i++) {
+          if (i >= 1 && i <= 12) {
+            costochondralJunctions.addLesion(i + getOrdinalSuffix(i), side);
+          }
+        }
+      }
+    } else if (lesion.includes('costovertebral')) {
+      if (!newLesions.includes('{costovertebralJoints}')) {
+        newLesions.push('{costovertebralJoints}')
+      }
+      const match = lesion.match(/(\d+)(?:st|nd|rd|th)?(?:-(\d+)(?:st|nd|rd|th)?)?/);
+      let side = ['left', 'right', 'bilateral'].find(s => lesion.includes(s)) || 'bilateral';
+      if (match) {
+        const start = parseInt(match[1]);
+        const end = match[2] ? parseInt(match[2]) : start;
+        for (let i = start; i <= end; i++) {
+          if (i >= 1 && i <= 12) {
+            costovertebralJoints.addLesion(i + getOrdinalSuffix(i), side);
+          }
+        }
+      }
+    } else if (lesion.includes('costosternal')) {
+      if (!newLesions.includes('{costosternalJoints}')) {
+        newLesions.push('{costosternalJoints}')
+      }
+      const match = lesion.match(/(\d+)(?:st|nd|rd|th)?(?:-(\d+)(?:st|nd|rd|th)?)?/);
+      let side = ['left', 'right', 'bilateral'].find(s => lesion.includes(s)) || 'bilateral';
+      if (match) {
+        const start = parseInt(match[1]);
+        const end = match[2] ? parseInt(match[2]) : start;
+        for (let i = start; i <= end; i++) {
+          if (i >= 1 && i <= 12) {
+            costosternalJoints.addLesion(i + getOrdinalSuffix(i), side);
+          }
+        }
+      }
+    } else if (lesion.match(/^[CTLS]\d+(-[CTLS]?\d+)?$/)) {
+
+
+      if (!newLesions.includes('{vertebralLevels}')) {
+        newLesions.push('{vertebralLevels}');
+      }
+      const expandedLesion = vertebralLevels.expandShorthandNotation(lesion);
+      vertebralLevels.addLesion(expandedLesion, "");
+    } else {
+      let side = ['left', 'right'].find(s => lesion.toLowerCase().includes(s));
+      if (side) {
+        let baseLesion = lesion.replace(new RegExp(side, 'i'), '').trim();
+        if (lateralLesions[baseLesion]) {
+          if (lateralLesions[baseLesion].side !== side) {
+            // 如果已经存在相反侧的病灶，合并为双侧
+            let index = newLesions.indexOf(lateralLesions[baseLesion].original);
+            if (index !== -1) {
+              // 使用简单的复数形式，保持原始大小写
+              let pluralBaseLesion = simplePluralize(baseLesion);
+              let bilateralLesion = 'bilateral ' + pluralBaseLesion;
+              
+              // 如果原始词是全小写，确保结果也是全小写
+              if (baseLesion === baseLesion.toLowerCase()) {
+                bilateralLesion = bilateralLesion.toLowerCase();
+              }
+              
+              newLesions[index] = bilateralLesion;
+              bilateralLesions.add(bilateralLesion.toLowerCase());
+            }
+            lateralLesions[baseLesion].side = 'bilateral';
+          }
+          // 不添加重复的病灶
+        } else {
+          // 第一次遇到这个病灶
+          lateralLesions[baseLesion] = { side: side, original: lesion };
+          newLesions.push(lesion);
+        }
+      } else if (lesion.toLowerCase().includes('bilateral')) {
+        // 直接添加双侧病灶，并记录
+        bilateralLesions.add(lesion.toLowerCase());
+        newLesions.push(lesion);
+      } else {
+        // 不含左右信息的病灶直接添加
+        newLesions.push(lesion);
+      }
+    }
+  });
+
+
+  bilaterRibsReduction = rightRibsReduction && leftRibsReduction ? true : bilaterRibsReduction;
+  if (newLesions.includes('{ribs}')) {
+    newLesions[newLesions.indexOf('{ribs}')] = bilaterRibsReduction ? 'bilateral ribs' : (
+      rightRibsReduction ? 'right ribs' : (
+        leftRibsReduction ? 'left ribs' : ribs.mergedText()
+      )
+    );
+  }  
+  if (newLesions.includes('{vertebralBodies}')) {
+    newLesions[newLesions.indexOf('{vertebralBodies}')] = vertebralBodies.mergedText();
+  } 
+  if (newLesions.includes('{endplates}')) {
+    newLesions[newLesions.indexOf('{endplates}')] = endplates.mergedText();
+  } 
+  if (newLesions.includes('{facetJoints}')) {
+    newLesions[newLesions.indexOf('{facetJoints}')] = facetJoints.mergedText();
+  } 
+  if (newLesions.includes('{costochondralJunctions}')) {
+    newLesions[newLesions.indexOf('{costochondralJunctions}')] = costochondralJunctions.mergedText();
+  } 
+  if (newLesions.includes('{costovertebralJoints}')) {
+    newLesions[newLesions.indexOf('{costovertebralJoints}')] = costovertebralJoints.mergedText();
+  } 
+  if (newLesions.includes('{vertebralLevels}')) {
+    newLesions[newLesions.indexOf('{vertebralLevels}')] = vertebralLevels.mergedText();
+  } 
+  if (newLesions.includes('{costosternalJoints}')) {
+    newLesions[newLesions.indexOf('{costosternalJoints}')] = costosternalJoints.mergedText();
+  } 
+  // 应用复数例外规则并移除重复的双侧描述
+  let processedBilateral = new Set();
+  newLesions = newLesions.filter((lesion, index) => {
+    let words = lesion.split(' ');
+    words = words.map(word => {
+      // 使用 simplePluralize 函数
+      return simplePluralize(word);
+    });
+    lesion = words.join(' ');
+
+
+    // 检查是否是双侧病灶，以及是否已经处理过
+    if (bilateralLesions.has(lesion.toLowerCase())) {
+      if (processedBilateral.has(lesion.toLowerCase())) {
+        return false; // 移除重复的双侧描述
+      }
+      processedBilateral.add(lesion.toLowerCase());
+    }
+    return true;
+  });
+  return newLesions;
+}
+
+
+// 辅助函数：获取序数后缀
+function getOrdinalSuffix(n) {
+  if (n % 10 === 1 && n % 100 !== 11) return 'st';
+  if (n % 10 === 2 && n % 100 !== 12) return 'nd';
+  if (n % 10 === 3 && n % 100 !== 13) return 'rd';
+  return 'th';
+}
+
+
+function parsePreviousReport(previousReport) {
+  const recordsSheet = AppConfig.getSheet('RECORDS');
+  let rangeLesions = recordsSheet.getRange('A2:I');
+  let valuesLesions = rangeLesions.getValues().map(row => row.map(() => ''));
+  previousReport = previousReport.includes('Exam Date') ? 'Exam Date' + previousReport.split('Exam Date')[1]: previousReport;
+  let response = gptApi(
+    contentUser = previousReport,
+    contentSystem = "Extract all lesions with radioactivity and return a two-key JSON object. The format should be: {'lesions': ['skull', 'posterolateral of right 3rd rib', 'left 9th rib', ...], 'examDate': string of date of examination formatted as 'YYYY-MM-DD', or '' if unavaiable}. Organize the lesions based on their location within the skeletal system, starting with the axial skeleton (listing skull and vertebral lesions first), then moving to the appendicular skeleton, sorting the lesions from head to toe. Maintain the original text's case consistency. \n###\nExample input: '...Exam Date : 2023/06/06 15:35:59 ( Approved ) Study Comment :...Tc-99m MDP whole body bone scan shows increased radioactivity in the lateral aspect of the left 2nd, 6th ribs and anterior aspect of the right 9th and left 8th ribs and skull.\n'###\nExpected output: {'lesions': ['skull', 'lateral aspect of left 2nd rib', 'lateral aspect of left 6th rib', 'anterior aspect of right 9th rib', 'anterior aspect of left 8th rib'], 'examDate': '2023-06-06'}"
+  ) 
+  response['lesions'].forEach((x, i) => {
+    valuesLesions[i] = ['increased radioactivity in the {lesion}','','','','','', x, '', '']
+  })
+  rangeLesions.setValues(valuesLesions);
+  updateDateFromServer(response['examDate']);
+  
+  
+  // 返回更新後的日期，以便在客戶端更新
+  return {
+    success: true,
+    date: response['examDate'],
+  };
+}
+
+
+function gptApi(contentUser = "hello", contentSystem = "response should be in form of JSON", responseType = "json_object",
+  model = "gpt-4o-mini") {
+  
+  // Use const for variables that are not reassigned to emphasize immutability
+  const urlFetch = "https://api.openai.com/v1/chat/completions";
+  const key = 'YOUR_OPENAI_API_KEY';
+  
+  // Directly assign headers within fetch parameters for clarity
+  const parameters = {
+    method: 'post',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`
+    },
+    // Simplifying payload construction
+    payload: JSON.stringify({
+      model,
+      // Construct messages more concisely
+      messages: [
+        ...contentSystem ? [{ "role": "system", "content": contentSystem }] : [],
+        { "role": "user", "content": contentUser }
+      ],
+      max_tokens: 4000,
+      temperature: 0,
+      response_format: { "type": responseType }
+    })
+  };
+
+
+  // Directly parsing fetch response to JSON
+  const response = UrlFetchApp.fetch(urlFetch, parameters).getContentText();
+  const jsonContent = JSON.parse(response);
+  // console.log(jsonContent);
+  const answerApi = JSON.parse(jsonContent['choices'][0]["message"]["content"]);
+  
+  console.log(answerApi);
+  return answerApi;
+}
+function getAppendix() {
+  const sheetRecords = AppConfig.getSheet('RECORDS');
+  const rangeAppendix = sheetRecords.getRange('B:G');
+  let valuesAppendix = rangeAppendix.getValues();
+  let columns = valuesAppendix[0];
+
+
+  
+  valuesAppendix = valuesAppendix.filter(x => x.slice(0, 5).join("").length > 0);
+
+
+  let appendix = valuesAppendix.slice(1).map(row =>
+    row.map((column, columnIndex) => 
+      column != '' ? `${columnIndex == 5 ? "" : columns[columnIndex] + ":"}${column.toString().padStart(3, ' ')}` : ''
+    )
+  )
+  appendix = appendix.map(row => [row[5].replace('aspect of ', '') + " →", ...row.slice(0, 5)].filter(x => x!='').join(' ')).join('\n');
+  console.log(appendix)
+  return {appendix};
+} 
+function splitRibDescriptions(input) {
+  // 改進的正則表達式，包含 bilateral
+  const regex = /\b(left|right|bilateral)\b\s*((?:\d+(?:st|nd|rd|th)(?:-\d+(?:st|nd|rd|th))?(?:,\s*)?)+)/gi;
+  const results = [];
+  let match;
+
+
+  while ((match = regex.exec(input)) !== null) {
+    const direction = match[1].toLowerCase();
+    const ribDescriptions = match[2].split(/,\s*/).filter(Boolean);
+
+
+    for (let ribDesc of ribDescriptions) {
+      if (direction === 'bilateral') {
+        results.push(`left ${ribDesc.trim()}`);
+        results.push(`right ${ribDesc.trim()}`);
+      } else {
+        results.push(`${direction} ${ribDesc.trim()}`);
+      }
+    }
+  }
+
+
+  // 根據方向（left/right）排序結果
+  results.sort((a, b) => {
+    if (a.startsWith('left') && b.startsWith('right')) return -1;
+    if (a.startsWith('right') && b.startsWith('left')) return 1;
+    return 0;
+  });
+
+
+  return results;
+}
+
+
+// // 測試函數
+// console.log(splitRibDescriptions('left 5th, 6th-8th'));
+// console.log(splitRibDescriptions('right 5th, 6th-8th, left 3rd-5th'));
+// console.log(splitRibDescriptions('left 3rd-5th, right 5th, 6th-8th'));
+// console.log(splitRibDescriptions('bilateral 3rd-5th, right 7th'));
+// console.log(splitRibDescriptions('left 2nd, bilateral 4th-6th, right 8th'));
+function splitVertebralDescriptions(description) {
+  const parts = description.split(/,\s*/);
+  const result = [];
+  
+  parts.forEach(part => {
+    if (part.includes('-')) {
+      const [start, end] = part.split('-');
+      if (start === end) {
+        // 如果开始和结束相同，只添加一次
+        result.push(start);
+      } else {
+        const startChar = start.charAt(0);
+        const startNum = parseInt(start.slice(1));
+        const endChar = end.charAt(0);
+        const endNum = parseInt(end.slice(1));
+        
+        if (startChar === endChar) {
+          for (let i = startNum; i <= endNum; i++) {
+            result.push(`${startChar}${i}`);
+          }
+        } else {
+          // 处理跨越不同字母的情况，如 C7-T3
+          const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+          const startIndex = alphabet.indexOf(startChar);
+          const endIndex = alphabet.indexOf(endChar);
+          
+          for (let charIndex = startIndex; charIndex <= endIndex; charIndex++) {
+            const currentChar = alphabet[charIndex];
+            const start = (charIndex === startIndex) ? startNum : 1;
+            const end = (charIndex === endIndex) ? endNum : (currentChar === 'C' ? 7 : (currentChar === 'T' ? 12 : (currentChar === 'L' ? 5 : 1)));
+            
+            for (let i = start; i <= end; i++) {
+              result.push(`${currentChar}${i}`);
+            }
+          }
+        }
+      }
+    } else {
+      result.push(part);
+    }
+  });
+  
+  return result;
+}

@@ -1,0 +1,14 @@
+.DS_Store
+
+# Local environment and secrets
+.env
+.env.*
+*.local
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+
+# Local reference data containing patient identifiers
+for_reference_only/reports.csv
