@@ -1364,10 +1364,14 @@ function getFindingsChangeGroup(change) {
   if (normalizedChange.includes('while')) return 'mixed';
   if (normalizedChange.includes('more intense') || normalizedChange.includes('more extended')) return 'progression';
   if (
-    normalizedChange.includes('less intense') ||
-    normalizedChange.includes('less extended') ||
     normalizedChange.includes('resolution') ||
     normalizedChange.includes('no more')
+  ) {
+    return 'resolution';
+  }
+  if (
+    normalizedChange.includes('less intense') ||
+    normalizedChange.includes('less extended')
   ) {
     return 'regression';
   }

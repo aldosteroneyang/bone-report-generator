@@ -1713,6 +1713,22 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       refreshReport();
     }
 
+    function closeReportWindowAfterSend() {
+      window.setTimeout(() => {
+        try {
+          window.close();
+        } catch (error) {
+          console.warn('Unable to close report window automatically:', error);
+        }
+
+        window.setTimeout(() => {
+          if (!window.closed) {
+            showNotification('Report data sent. You may close this tab.');
+          }
+        }, 500);
+      }, 0);
+    }
+
     function sendReportData() {
       const examDate = document.getElementById('examDate').value.trim();
       const tableData = hot.getData();
@@ -1740,6 +1756,7 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
           window.opener.postMessage(reportData, '*');
           showNotification('Report data sent');
           console.log('Report data sent:', reportData);
+          closeReportWindowAfterSend();
         } else {
           showNotification('No opener found, unable to send data', true);
           console.error('No opener found, unable to send data', reportData);
