@@ -1358,6 +1358,23 @@ function stripGenericRadioactivityPrefix(text) {
   return `${text || ''}`.replace(/^increased radioactivity in (?:the )?/i, '');
 }
 
+function getFindingsChangeGroup(change) {
+  const normalizedChange = `${change || ''}`.toLowerCase();
+  if (normalizedChange.includes('newly')) return 'new';
+  if (normalizedChange.includes('while')) return 'mixed';
+  if (normalizedChange.includes('more intense') || normalizedChange.includes('more extended')) return 'progression';
+  if (
+    normalizedChange.includes('less intense') ||
+    normalizedChange.includes('less extended') ||
+    normalizedChange.includes('resolution') ||
+    normalizedChange.includes('no more')
+  ) {
+    return 'regression';
+  }
+  if (normalizedChange.includes('stationary') || normalizedChange.includes('without apparent change')) return 'stationary';
+  return normalizedChange;
+}
+
 function shallowCopyRow(row) {
   return Array.isArray(row) ? [...row] : row;
 }
@@ -2088,26 +2105,34 @@ function getReport(tableData, examDate) {
       return appendAppendixText(`Tc-99m MDP whole body bone scan shows ${assembleFindings[''].trim()}.`, appendixText);
     }
 
-    const formatChanges = () => {
+    const getOrderedChanges = () => {
       const changesOrder = Object.keys(window.changesCandidates || {});
       const orderedChanges = changesOrder.filter(change => changesFindings.includes(change));
       const unorderedChanges = changesFindings.filter(change => !changesOrder.includes(change) && change !== '');
-      return [...orderedChanges, ...unorderedChanges]
-        .map(change => change.replace('{}', assembleFindings[change]))
-        .join(' ');
+      return [...orderedChanges, ...unorderedChanges];
     };
+
+    const formatChanges = () => getOrderedChanges()
+      .map(change => ({
+        change,
+        text: change.replace('{}', assembleFindings[change])
+      }))
+      .reduce((parts, item, index, items) => {
+        const separator = index > 0 && getFindingsChangeGroup(items[index - 1].change) !== getFindingsChangeGroup(item.change)
+          ? '; '
+          : ' ';
+        return `${parts}${index === 0 ? '' : separator}${item.text}`;
+      }, '');
 
     if (changesFindings.includes('')) {
       const changes = formatChanges();
       const additional = capitalizeFirstLetter(assembleFindings[''].trim());
-      return appendAppendixText(`Tc-99m MDP whole body bone scan shows ${changes} ${comparisonReference}.\n\n${additional} ${(additional.match(/ in /g) || []).length > 1 ? 'are' : 'is'} also noted.`, appendixText);
+      return appendAppendixText(`Tc-99m MDP whole body bone scan shows ${changes}; ${comparisonReference}.\n\n${additional} ${(additional.match(/ in /g) || []).length > 1 ? 'are' : 'is'} also noted.`, appendixText);
     }
 
-    const allFindings = Object.entries(assembleFindings)
-      .map(([change, lesion]) => change ? change.replace('{}', lesion) : lesion)
-      .join(' ');
+    const allFindings = formatChanges();
 
-    return appendAppendixText(`Tc-99m MDP whole body bone scan shows ${allFindings} ${comparisonReference}.`, appendixText);
+    return appendAppendixText(`Tc-99m MDP whole body bone scan shows ${allFindings}; ${comparisonReference}.`, appendixText);
   };
 
   function formatFindingsSeparated (changesFindings, result) {
