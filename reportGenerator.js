@@ -1400,6 +1400,55 @@ function mergeLesions(lesions, separator=', ') {
   return formatSeries(lesions, separator);
 }
 
+function stripLesionExceptionNote(value) {
+  return String(value || '').trim().replace(/\s+\(except [^)]+\)\s*$/i, '');
+}
+
+function normalizeLesionKey(value) {
+  return stripLesionExceptionNote(value).replace(/\s+/g, ' ').toLowerCase();
+}
+
+function getLesionSortPlaceholder(lesion) {
+  let placeholder = stripLesionExceptionNote(lesion);
+  if (placeholder.match(/^[CTLS]\d+(-[CTLS]?\d+)?$/) && placeholder.includes('-')) {
+    placeholder = placeholder.split('-')[0];
+  } else if (placeholder.includes('rib')) {
+    placeholder = 'bilateral ribs';
+  } else if (placeholder.includes('vertebral bod')) {
+    placeholder = 'vertebral body of C1';
+  } else if (placeholder.includes('endplate')) {
+    placeholder = 'endplates of C1-C2';
+  } else if (placeholder.includes('facet')) {
+    placeholder = 'bilateral facet joints of C1-C2';
+  } else if (placeholder.includes('costochondral')) {
+    placeholder = 'bilateral 1st costochondral junctions';
+  } else if (placeholder.includes('costovertebral')) {
+    placeholder = 'bilateral 1st costovertebral joints';
+  } else if (placeholder.includes('costosternal')) {
+    placeholder = 'bilateral 1st costosternal joints';
+  }
+  return placeholder;
+}
+
+function compareByOrder(a, b, order, getPlaceholder = value => value) {
+  const indexA = order.indexOf(getPlaceholder(a));
+  const indexB = order.indexOf(getPlaceholder(b));
+  if (indexA === -1 && indexB === -1) return 0;
+  if (indexA === -1) return 1;
+  if (indexB === -1) return -1;
+  return indexA - indexB;
+}
+
+function sortLesionsByCandidateOrder(lesions, order = window.lesionsCandidates || []) {
+  return (lesions || [])
+    .map((lesion, index) => ({ lesion, index }))
+    .sort((a, b) => {
+      const orderResult = compareByOrder(a.lesion, b.lesion, order, getLesionSortPlaceholder);
+      return orderResult !== 0 ? orderResult : a.index - b.index;
+    })
+    .map(item => item.lesion);
+}
+
 const COMPLETE_SPINE_RANGES = {
   'c-spine': ['C1', 'C7'],
   't-spine': ['T1', 'T12'],
@@ -1412,9 +1461,239 @@ const COMPLETE_SPINE_RANGES = {
   'c-t-l-s spine': ['C1', 'S1']
 };
 
+const SPINE_SUBREGION_RANGES = {
+  'upper c-spine': ['C1', 'C3'],
+  'middle c-spine': ['C3', 'C5'],
+  'lower c-spine': ['C5', 'C7'],
+  'upper t-spine': ['T1', 'T4'],
+  'middle t-spine': ['T5', 'T8'],
+  'lower l-spine': ['L4', 'L5']
+};
+
+function createCoverageMap(entries) {
+  return entries.reduce((acc, [parent, children]) => {
+    acc[normalizeLesionKey(parent)] = new Set(children.map(normalizeLesionKey));
+    return acc;
+  }, {});
+}
+
+const SKULL_FAMILY_LESIONS = [
+  'skull base',
+  'left skull base',
+  'right skull base',
+  'ethmoid bone',
+  'bilateral frontal bone',
+  'frontal bone',
+  'bilateral supraorbital areas of frontal bone',
+  'left supraorbital area of frontal bone',
+  'right supraorbital area of frontal bone',
+  'left frontal bone',
+  'right frontal bone',
+  'bilateral frontal/parietal bones',
+  'left frontal/parietal bone',
+  'right frontal/parietal bone',
+  'bilateral parietal bones',
+  'parietal bones',
+  'left parietal bone',
+  'right parietal bone',
+  'bilateral temporal bones',
+  'left temporal bone',
+  'right temporal bone',
+  'bilateral temporal mastoid processes',
+  'left temporal mastoid process',
+  'right temporal mastoid process',
+  'bilateral occipital bone',
+  'occipital bone',
+  'left occipital bone',
+  'right occipital bone',
+  'bilateral zygomatic bone',
+  'left zygomatic bone',
+  'right zygomatic bone',
+  'bilateral maxilla',
+  'maxilla',
+  'left maxilla',
+  'right maxilla',
+  'bilateral mandible',
+  'mandible',
+  'left mandible',
+  'right mandible',
+  'bilateral temporomandibular joints',
+  'left temporomandibular joint',
+  'right temporomandibular joint',
+  'bilateral paranasal areas',
+  'paranasal area',
+  'left paranasal area',
+  'right paranasal area'
+];
+
+const LEFT_PELVIC_COMPONENTS = [
+  'left ilium',
+  'left iliac crest',
+  'left ischium',
+  'left ischial tuberosity',
+  'left pubis',
+  'left superior pubic ramus',
+  'left inferior pubic ramus',
+  'left acetabulum'
+];
+
+const RIGHT_PELVIC_COMPONENTS = [
+  'right ilium',
+  'right iliac crest',
+  'right ischium',
+  'right ischial tuberosity',
+  'right pubis',
+  'right superior pubic ramus',
+  'right inferior pubic ramus',
+  'right acetabulum'
+];
+
+const BILATERAL_PELVIC_COMPONENTS = [
+  'bilateral ilia',
+  'bilateral iliac crests',
+  'bilateral ischia',
+  'bilateral ischial tuberosities',
+  'bilateral pubes',
+  'bilateral superior pubic rami',
+  'bilateral inferior pubic rami',
+  'bilateral acetabula'
+];
+
+const LESION_COVERAGE_MAP = createCoverageMap([
+  ['skull', SKULL_FAMILY_LESIONS],
+  ['skull base', ['left skull base', 'right skull base']],
+  ['bilateral frontal bone', [
+    'frontal bone',
+    'left frontal bone',
+    'right frontal bone',
+    'bilateral supraorbital areas of frontal bone',
+    'left supraorbital area of frontal bone',
+    'right supraorbital area of frontal bone'
+  ]],
+  ['frontal bone', [
+    'left frontal bone',
+    'right frontal bone',
+    'bilateral supraorbital areas of frontal bone',
+    'left supraorbital area of frontal bone',
+    'right supraorbital area of frontal bone'
+  ]],
+  ['bilateral supraorbital areas of frontal bone', [
+    'left supraorbital area of frontal bone',
+    'right supraorbital area of frontal bone'
+  ]],
+  ['bilateral frontal/parietal bones', [
+    'left frontal/parietal bone',
+    'right frontal/parietal bone'
+  ]],
+  ['bilateral parietal bones', [
+    'parietal bones',
+    'left parietal bone',
+    'right parietal bone'
+  ]],
+  ['parietal bones', ['left parietal bone', 'right parietal bone']],
+  ['bilateral temporal bones', [
+    'left temporal bone',
+    'right temporal bone',
+    'bilateral temporal mastoid processes',
+    'left temporal mastoid process',
+    'right temporal mastoid process'
+  ]],
+  ['bilateral temporal mastoid processes', [
+    'left temporal mastoid process',
+    'right temporal mastoid process'
+  ]],
+  ['bilateral occipital bone', [
+    'occipital bone',
+    'left occipital bone',
+    'right occipital bone'
+  ]],
+  ['occipital bone', ['left occipital bone', 'right occipital bone']],
+  ['bilateral zygomatic bone', ['left zygomatic bone', 'right zygomatic bone']],
+  ['bilateral maxilla', ['maxilla', 'left maxilla', 'right maxilla']],
+  ['maxilla', ['left maxilla', 'right maxilla']],
+  ['bilateral mandible', ['mandible', 'left mandible', 'right mandible']],
+  ['mandible', ['left mandible', 'right mandible']],
+  ['bilateral temporomandibular joints', [
+    'left temporomandibular joint',
+    'right temporomandibular joint'
+  ]],
+  ['bilateral paranasal areas', [
+    'paranasal area',
+    'left paranasal area',
+    'right paranasal area'
+  ]],
+  ['paranasal area', ['left paranasal area', 'right paranasal area']],
+  ['bilateral pelvic bones', [
+    'left pelvic bones',
+    'right pelvic bones',
+    ...BILATERAL_PELVIC_COMPONENTS,
+    ...LEFT_PELVIC_COMPONENTS,
+    ...RIGHT_PELVIC_COMPONENTS
+  ]],
+  ['left pelvic bones', LEFT_PELVIC_COMPONENTS],
+  ['right pelvic bones', RIGHT_PELVIC_COMPONENTS],
+  ['bilateral ilia', [
+    'left ilium',
+    'right ilium',
+    'bilateral iliac crests',
+    'left iliac crest',
+    'right iliac crest'
+  ]],
+  ['left ilium', ['left iliac crest']],
+  ['right ilium', ['right iliac crest']],
+  ['bilateral iliac crests', ['left iliac crest', 'right iliac crest']],
+  ['bilateral ischia', [
+    'left ischium',
+    'right ischium',
+    'bilateral ischial tuberosities',
+    'left ischial tuberosity',
+    'right ischial tuberosity'
+  ]],
+  ['left ischium', ['left ischial tuberosity']],
+  ['right ischium', ['right ischial tuberosity']],
+  ['bilateral ischial tuberosities', [
+    'left ischial tuberosity',
+    'right ischial tuberosity'
+  ]],
+  ['bilateral pubes', [
+    'left pubis',
+    'right pubis',
+    'bilateral superior pubic rami',
+    'left superior pubic ramus',
+    'right superior pubic ramus',
+    'bilateral inferior pubic rami',
+    'left inferior pubic ramus',
+    'right inferior pubic ramus'
+  ]],
+  ['left pubis', ['left superior pubic ramus', 'left inferior pubic ramus']],
+  ['right pubis', ['right superior pubic ramus', 'right inferior pubic ramus']],
+  ['bilateral superior pubic rami', [
+    'left superior pubic ramus',
+    'right superior pubic ramus'
+  ]],
+  ['bilateral inferior pubic rami', [
+    'left inferior pubic ramus',
+    'right inferior pubic ramus'
+  ]],
+  ['bilateral acetabula', ['left acetabulum', 'right acetabulum']]
+]);
+
 function getCompleteSpineRange(lesion) {
-  const key = String(lesion || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const key = normalizeLesionKey(lesion);
   return COMPLETE_SPINE_RANGES[key] || null;
+}
+
+function getCoveredSpineLevels(lesion) {
+  const key = normalizeLesionKey(lesion);
+  const namedRange = getCompleteSpineRange(lesion) || SPINE_SUBREGION_RANGES[key];
+  if (namedRange) {
+    const startIndex = LOCATIONS.VERTEBRAE.indexOf(namedRange[0]);
+    const endIndex = LOCATIONS.VERTEBRAE.indexOf(namedRange[1]);
+    if (startIndex === -1 || endIndex === -1 || startIndex > endIndex) return [];
+    return LOCATIONS.VERTEBRAE.slice(startIndex, endIndex + 1);
+  }
+
+  return expandSimpleVertebralLesion(lesion);
 }
 
 function expandSimpleVertebralLesion(lesion) {
@@ -1442,26 +1721,79 @@ function spineRangeContainsLevels(spineRange, levels) {
   });
 }
 
-function filterCoveredSimpleVertebralLesions(lesions) {
-  const completeSpineRanges = lesions
-    .map(getCompleteSpineRange)
-    .filter(Boolean);
+function isSpineLesionCoveredByParent(parent, lesion) {
+  const parentRange = getCompleteSpineRange(parent);
+  if (!parentRange) return false;
 
-  if (completeSpineRanges.length === 0) return lesions;
+  const levels = getCoveredSpineLevels(lesion);
+  return spineRangeContainsLevels(parentRange, levels);
+}
 
+function isMappedLesionCoveredByParent(parent, lesion) {
+  const coveredChildren = LESION_COVERAGE_MAP[normalizeLesionKey(parent)];
+  return coveredChildren ? coveredChildren.has(normalizeLesionKey(lesion)) : false;
+}
+
+function isLesionCoveredByParent(parent, lesion) {
+  if (normalizeLesionKey(parent) === normalizeLesionKey(lesion)) return false;
+  return isSpineLesionCoveredByParent(parent, lesion) ||
+    isMappedLesionCoveredByParent(parent, lesion);
+}
+
+function filterCoveredLesions(lesions) {
   return lesions.filter(lesion => {
-    if (getCompleteSpineRange(lesion)) return true;
+    return !lesions.some(parent => isLesionCoveredByParent(parent, lesion));
+  });
+}
 
-    const levels = expandSimpleVertebralLesion(lesion);
-    if (levels.length === 0) return true;
+function addImpressionLesionExceptionNotes(rows) {
+  const { LESIONS, CHANGES, IMPRESSIONS } = COLUMN_INDICES;
+  const rowsByImpression = rows.reduce((groups, row, index) => {
+    const impression = row?.[IMPRESSIONS];
+    if (!impression || typeof impression !== 'string') return groups;
+    if (!groups.has(impression)) groups.set(impression, []);
+    groups.get(impression).push({ row, index });
+    return groups;
+  }, new Map());
 
-    return !completeSpineRanges.some(spineRange => spineRangeContainsLevels(spineRange, levels));
+  const exceptionsByIndex = new Map();
+
+  rowsByImpression.forEach(groupRows => {
+    groupRows.forEach(({ row: parentRow, index: parentIndex }) => {
+      const parentLesion = parentRow?.[LESIONS];
+      if (!parentLesion || typeof parentLesion !== 'string') return;
+
+      groupRows.forEach(({ row: childRow }) => {
+        const childLesion = childRow?.[LESIONS];
+        if (!childLesion || typeof childLesion !== 'string') return;
+        if (parentRow[CHANGES] === childRow[CHANGES]) return;
+        if (!isLesionCoveredByParent(parentLesion, childLesion)) return;
+
+        if (!exceptionsByIndex.has(parentIndex)) {
+          exceptionsByIndex.set(parentIndex, []);
+        }
+        const exceptions = exceptionsByIndex.get(parentIndex);
+        if (!exceptions.some(exception => normalizeLesionKey(exception) === normalizeLesionKey(childLesion))) {
+          exceptions.push(childLesion);
+        }
+      });
+    });
+  });
+
+  return rows.map((row, index) => {
+    const exceptions = exceptionsByIndex.get(index);
+    if (!exceptions || exceptions.length === 0) return row;
+
+    const rowCopy = shallowCopyRow(row);
+    const sortedExceptions = sortLesionsByCandidateOrder(exceptions);
+    rowCopy[LESIONS] = `${stripLesionExceptionNote(rowCopy[LESIONS])} (except ${formatSeries(sortedExceptions, ', ')})`;
+    return rowCopy;
   });
 }
 
 // 合併病灶解剖結構 - 完全按照 Google Apps Script 版本
 function mergeLesionsAnatomies(lesions) {
-  lesions = filterCoveredSimpleVertebralLesions(lesions);
+  lesions = filterCoveredLesions(lesions);
 
   let newLesions = [];
   let ribs = new Ribs();
@@ -1788,35 +2120,12 @@ function assembleItems(classifiedLesions, categories) {
   function sortByOrder(obj, category) {
     const order = sortingValues[category];
     return Object.keys(obj).sort((a, b) => {
-      let placeholders = {'a': a, 'b': b};
-      if (category == 'LESIONS') {
-        Object.keys(placeholders).forEach(key => {
-          if (placeholders[key].match(/^[CTLS]\d+(-[CTLS]?\d+)?$/) && placeholders[key].includes('-')) {
-            placeholders[key] = placeholders[key].split('-')[0];
-          } else if (placeholders[key].includes('rib')) {
-            placeholders[key] = 'bilateral ribs';
-          } else if (placeholders[key].includes('vertebral bod')) {
-            placeholders[key] = 'vertebral body of C1';
-          } else if (placeholders[key].includes('endplate')) {
-            placeholders[key] = 'endplates of C1-C2';
-          } else if (placeholders[key].includes('facet')) {
-            placeholders[key] = 'bilateral facet joints of C1-C2';
-          } else if (placeholders[key].includes('costochondral')) {
-            placeholders[key] = 'bilateral 1st costochondral junctions';
-          } else if (placeholders[key].includes('costovertebral')) {
-            placeholders[key] = 'bilateral 1st costovertebral joints';
-          } else if (placeholders[key].includes('costosternal')) {
-            placeholders[key] = 'bilateral 1st costosternal joints';
-          }
-        })              
-      }
-
-      const indexA = order.indexOf(placeholders['a']);
-      const indexB = order.indexOf(placeholders['b']);
-      if (indexA === -1 && indexB === -1) return 0;
-      if (indexA === -1) return 1;
-      if (indexB === -1) return -1;
-      return indexA - indexB;
+      return compareByOrder(
+        a,
+        b,
+        order,
+        category === 'LESIONS' ? getLesionSortPlaceholder : value => value
+      );
     });
   }
 
@@ -2097,6 +2406,8 @@ function getReport(tableData, examDate) {
         : mappingChangeInverse[currentChange] ??
       currentChange;
   })
+
+  lesionsImpressions = addImpressionLesionExceptionNotes(lesionsImpressions);
 
   let assembleImpressions = assembleItems(getClassifiedLesions(lesionsImpressions, ['IMPRESSIONS', 'CHANGES', 'LESIONS']), ['IMPRESSIONS', 'CHANGES', 'LESIONS']);
 

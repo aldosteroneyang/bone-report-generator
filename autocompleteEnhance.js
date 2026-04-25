@@ -154,11 +154,82 @@
     return td;
   }
 
+  function getDropdownVerticalSpaces(editor) {
+    const view = editor?.hot?.view;
+    const cellRect = editor?.getEditedCellRect?.();
+
+    if (!view || !cellRect) {
+      return { spaceAbove: 0, spaceBelow: Number.POSITIVE_INFINITY };
+    }
+
+    let spaceAbove = cellRect.top;
+    if (typeof view.isVerticallyScrollableByWindow === 'function' &&
+        typeof view.getTableOffset === 'function' &&
+        view.isVerticallyScrollableByWindow()) {
+      const topOffset = view.getTableOffset().top - (editor.hot.rootWindow?.scrollY || 0);
+      spaceAbove = Math.max(spaceAbove + topOffset, 0);
+    }
+
+    const workspaceHeight = typeof view.getWorkspaceHeight === 'function'
+      ? view.getWorkspaceHeight()
+      : Number.POSITIVE_INFINITY;
+
+    return {
+      spaceAbove,
+      spaceBelow: Math.max(workspaceHeight - spaceAbove - cellRect.height, 0)
+    };
+  }
+
+  function keepDropdownBelowCell(editor) {
+    const dropdownRoot = editor?.htEditor?.rootElement;
+    if (!dropdownRoot) return;
+
+    if (typeof editor.unflipDropdownVertically === 'function') {
+      editor.unflipDropdownVertically();
+      return;
+    }
+
+    dropdownRoot.style.position = 'absolute';
+    dropdownRoot.style.top = '';
+    editor.isFlippedVertically = false;
+  }
+
+  function getMinimumDropdownHeight(editor) {
+    const choiceCount = editor?.strippedChoices?.length || editor?.htEditor?.countRows?.() || 0;
+    if (choiceCount === 0) return 0;
+
+    const rowHeight = editor?.htEditor?.stylesHandler?.getDefaultRowHeight?.() ||
+      editor?.hot?.stylesHandler?.getDefaultRowHeight?.() ||
+      23;
+
+    return Math.min(choiceCount, 4) * rowHeight;
+  }
+
   // 5. 封裝覆寫 AutocompleteEditor 的函式，使用局部變數替代全局變數
   function enhanceAutocompleteDropdown() {
     const AutocompleteEditor = Handsontable.editors.AutocompleteEditor;
     const originalOpen = AutocompleteEditor.prototype.open;
     const originalFinish = AutocompleteEditor.prototype.finishEditing;
+
+    // Handsontable 會在下方空間不足時把 autocomplete list 翻到 cell 上方。
+    // 這裡固定取消垂直翻轉，讓候選清單一律從目前 cell 下方展開。
+    AutocompleteEditor.prototype.flipDropdownVerticallyIfNeeded = function() {
+      const spaces = getDropdownVerticalSpaces(this);
+
+      keepDropdownBelowCell(this);
+
+      if (typeof this.limitDropdownIfNeeded === 'function' &&
+          Number.isFinite(spaces.spaceBelow)) {
+        this.limitDropdownIfNeeded(Math.max(spaces.spaceBelow, getMinimumDropdownHeight(this)));
+        keepDropdownBelowCell(this);
+      }
+
+      return {
+        isFlipped: false,
+        spaceAbove: spaces.spaceAbove,
+        spaceBelow: spaces.spaceBelow
+      };
+    };
     
     // 使用閉包保存查詢字符串，替代全局變數
     let lastQuery = '';

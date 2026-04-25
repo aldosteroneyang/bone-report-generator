@@ -398,6 +398,12 @@
       color: var(--text-muted) !important;
       font-weight: 600 !important;
     }
+    .handsontable th.candidate-sort-header {
+      cursor: pointer;
+    }
+    .handsontable th.candidate-sort-header-active {
+      color: var(--text) !important;
+    }
     .handsontable .currentRow,
     .handsontable .currentCol,
     .handsontable .area {
@@ -679,6 +685,8 @@
     const COLUMN_INDEX = {
       RADIOACTIVITIES: 0,
       LESIONS: 1,
+      CHANGES: 2,
+      IMPRESSIONS: 3,
       NOTE: 4,
       S: 5,
       I: 6,
@@ -741,7 +749,18 @@
     }
     
     // 取得欄位標題
-    const colHeaders = myColumns.map(col => col.title);
+    const baseColHeaders = myColumns.map(col => col.title);
+    const SORTABLE_COLUMN_INDEXES = new Set([
+      COLUMN_INDEX.RADIOACTIVITIES,
+      COLUMN_INDEX.LESIONS,
+      COLUMN_INDEX.CHANGES,
+      COLUMN_INDEX.IMPRESSIONS
+    ]);
+    const candidateSortState = {
+      columnIndex: null,
+      direction: 'asc'
+    };
+    const colHeaders = index => getColumnHeader(index);
     const container = document.getElementById('hot');
     const minColumnWidths = [120, 138, 106, 240, 120, 38, 38, 38, 38];
     const DEFAULT_RADIOACTIVITY = 'increased radioactivity in {}';
@@ -761,8 +780,116 @@
         normalizedPrefix: prefix.toLowerCase()
       };
     }).sort((a, b) => b.prefix.length - a.prefix.length);
+    const candidateSortOrderMaps = new Map([
+      [COLUMN_INDEX.RADIOACTIVITIES, buildCandidateSortOrderMap(window.radioactivitiesCandidates || [])],
+      [COLUMN_INDEX.LESIONS, buildCandidateSortOrderMap([
+        ...getCandidateItems(window.lesionsCandidates || []),
+        ...getCandidateItems(window.appendicesCandidates || [])
+      ])],
+      [COLUMN_INDEX.CHANGES, buildCandidateSortOrderMap(Object.keys(window.changesCandidates || {}))],
+      [COLUMN_INDEX.IMPRESSIONS, buildCandidateSortOrderMap(window.impressionsCandidates || [])]
+    ]);
     let selectedParserMode = PARSER_MODE.API;
     let resolvedParserMode = PARSER_MODE.API;
+
+    function normalizeSortValue(value) {
+      return normalizeCandidateValue(value).toLowerCase().replace(/\.$/, '');
+    }
+
+    function buildCandidateSortOrderMap(candidates) {
+      const orderMap = new Map();
+      getCandidateItems(candidates).forEach((candidate, index) => {
+        const key = normalizeSortValue(candidate);
+        if (key && !orderMap.has(key)) {
+          orderMap.set(key, index);
+        }
+      });
+      return orderMap;
+    }
+
+    function isSortableColumn(columnIndex) {
+      return SORTABLE_COLUMN_INDEXES.has(columnIndex);
+    }
+
+    function getColumnHeader(index) {
+      const header = baseColHeaders[index] || '';
+      if (candidateSortState.columnIndex !== index) {
+        return header;
+      }
+      return `${header} ${candidateSortState.direction === 'asc' ? '↑' : '↓'}`;
+    }
+
+    function isBlankRow(row) {
+      return (row || []).every(cell => normalizeCandidateValue(cell) === '');
+    }
+
+    function getCandidateSortInfo(row, columnIndex, orderMap) {
+      const normalizedValue = normalizeSortValue(row?.[columnIndex]);
+      const isKnownCandidate = normalizedValue !== '' && orderMap.has(normalizedValue);
+
+      return {
+        isKnownCandidate,
+        rank: isKnownCandidate ? orderMap.get(normalizedValue) : Number.POSITIVE_INFINITY
+      };
+    }
+
+    function sortRowsByCandidateOrder(rows, columnIndex, direction) {
+      const orderMap = candidateSortOrderMaps.get(columnIndex) || new Map();
+      const directionMultiplier = direction === 'desc' ? -1 : 1;
+
+      return rows
+        .map((row, index) => {
+          const blank = isBlankRow(row);
+          const sortInfo = blank
+            ? { isKnownCandidate: false, rank: Number.POSITIVE_INFINITY }
+            : getCandidateSortInfo(row, columnIndex, orderMap);
+
+          return {
+            row,
+            index,
+            blank,
+            ...sortInfo
+          };
+        })
+        .sort((a, b) => {
+          if (a.blank !== b.blank) {
+            return a.blank ? 1 : -1;
+          }
+          if (a.isKnownCandidate !== b.isKnownCandidate) {
+            return a.isKnownCandidate ? -1 : 1;
+          }
+          if (a.isKnownCandidate && b.isKnownCandidate && a.rank !== b.rank) {
+            return (a.rank - b.rank) * directionMultiplier;
+          }
+          return a.index - b.index;
+        })
+        .map(item => item.row);
+    }
+
+    function persistSortedTableData(sortedData) {
+      localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(sortedData));
+      refreshReport({ silent: true });
+      scheduleDraftSave();
+    }
+
+    function applyCandidateOrderSort(columnIndex) {
+      if (!isSortableColumn(columnIndex)) {
+        return;
+      }
+
+      const nextDirection = candidateSortState.columnIndex === columnIndex && candidateSortState.direction === 'asc'
+        ? 'desc'
+        : 'asc';
+
+      candidateSortState.columnIndex = columnIndex;
+      candidateSortState.direction = nextDirection;
+
+      const sortedData = sortRowsByCandidateOrder(hot.getData(), columnIndex, nextDirection);
+      hot.loadData(sortedData);
+      persistSortedTableData(sortedData);
+      hot.render();
+      showNotification(`${baseColHeaders[columnIndex]} 已${nextDirection === 'asc' ? '正向' : '反向'}排序`);
+    }
 
     // 動態計算欄寬：依據容器寬度與各欄比例
     function calculateColWidth(index) {
@@ -848,7 +975,7 @@
     function exportToCsv() {
       try {
         const data = hot.getData();
-        const headers = colHeaders.join(',');
+        const headers = baseColHeaders.join(',');
         const rows = data.map(row => row.map(cell => {
           // 處理特殊字符，確保 CSV 格式正確
           const cellStr = String(cell || '');
@@ -1474,6 +1601,34 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
         .join('\n');
     }
 
+    function mergeKeywordValues(existingKeyword, generatedKeyword) {
+      const existingText = String(existingKeyword || '');
+      const existingLineKeys = new Set(
+        existingText
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(Boolean)
+      );
+      const missingGeneratedLines = String(generatedKeyword || '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => {
+          if (!line || existingLineKeys.has(line)) {
+            return false;
+          }
+          existingLineKeys.add(line);
+          return true;
+        });
+
+      if (missingGeneratedLines.length === 0) {
+        return existingText;
+      }
+      if (!existingText) {
+        return missingGeneratedLines.join('\n');
+      }
+      return `${existingText}${existingText.endsWith('\n') ? '' : '\n'}${missingGeneratedLines.join('\n')}`;
+    }
+
     function getGeneratorState() {
       return {
         tableData: hot ? hot.getData() : [],
@@ -1487,7 +1642,7 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
         Procedure: { value: BONE_SCAN_PROCEDURE },
         Findings: { value: report.textFindings || '' },
         Impression: { value: report.textImpressions || '' },
-        Keyword: { value: generateKeyword(tableData) }
+        Keyword: { value: mergeKeywordValues(getAreaValue(guiExtensionData, 'Keyword'), generateKeyword(tableData)) }
       };
     }
 
@@ -1525,6 +1680,28 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       colWidths: index => calculateColWidth(index),
       stretchH: 'none',
       licenseKey: 'non-commercial-and-evaluation',
+      afterGetColHeader: function(column, TH) {
+        const sortable = isSortableColumn(column);
+        TH.classList.toggle('candidate-sort-header', sortable);
+        TH.classList.toggle('candidate-sort-header-active', candidateSortState.columnIndex === column);
+        if (sortable) {
+          TH.title = '依候選清單順序排序';
+          TH.setAttribute('aria-sort', candidateSortState.columnIndex === column
+            ? (candidateSortState.direction === 'asc' ? 'ascending' : 'descending')
+            : 'none');
+        } else {
+          TH.removeAttribute('aria-sort');
+          TH.removeAttribute('title');
+        }
+      },
+      afterOnCellMouseDown: function(event, coords) {
+        const target = event?.target;
+        const isColumnResizeHandle = Boolean(target?.closest?.('.manualColumnResizer'));
+        if ((event?.button ?? 0) !== 0 || isColumnResizeHandle || !coords || coords.row >= 0 || !isSortableColumn(coords.col)) {
+          return;
+        }
+        applyCandidateOrderSort(coords.col);
+      },
       // 自動儲存功能 - 當編輯完成時觸發
       afterChange: function(changes, source) {
         if (changes &&
