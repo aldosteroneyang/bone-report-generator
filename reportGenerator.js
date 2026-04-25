@@ -1354,10 +1354,6 @@ function formatImpressionItems(items) {
   );
 }
 
-function stripGenericRadioactivityPrefix(text) {
-  return `${text || ''}`.replace(/^increased radioactivity in (?:the )?/i, '');
-}
-
 function getFindingsChangeGroup(change) {
   const normalizedChange = `${change || ''}`.toLowerCase();
   if (normalizedChange.includes('newly')) return 'new';
@@ -1377,6 +1373,28 @@ function getFindingsChangeGroup(change) {
   }
   if (normalizedChange.includes('stationary') || normalizedChange.includes('without apparent change')) return 'stationary';
   return normalizedChange;
+}
+
+function getChangeCandidateValue(change) {
+  const changesCandidates = window.changesCandidates || {};
+  return Object.prototype.hasOwnProperty.call(changesCandidates, change)
+    ? changesCandidates[change]
+    : undefined;
+}
+
+function isResolvedChange(change) {
+  const normalizedChange = `${change || ''}`.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (normalizedChange === '') return false;
+  if (getChangeCandidateValue(change) === '') return true;
+  return normalizedChange.startsWith('no more ') ||
+    normalizedChange.startsWith('complete resolution');
+}
+
+function getChangePlaceholderMode(change) {
+  const normalizedChange = `${change || ''}`.trim();
+  return normalizedChange.startsWith('{}') && !isResolvedChange(change)
+    ? 'full-finding'
+    : 'lesion-only';
 }
 
 function shallowCopyRow(row) {
@@ -1401,11 +1419,24 @@ function mergeLesions(lesions, separator=', ') {
 }
 
 function stripLesionExceptionNote(value) {
-  return String(value || '').trim().replace(/\s+\(except [^)]+\)\s*$/i, '');
+  return String(value || '').trim()
+    .replace(/\s+\(except [^)]+\)\s*$/i, '')
+    .replace(/\s+\([^)]*\bribs?\b[^)]*\)\s*$/i, '');
+}
+
+function hasLesionExceptionNote(value) {
+  return stripLesionExceptionNote(value) !== String(value || '').trim();
 }
 
 function normalizeLesionKey(value) {
   return stripLesionExceptionNote(value).replace(/\s+/g, ' ').toLowerCase();
+}
+
+function shortenRibAspectLesion(lesion) {
+  if (!lesion || typeof lesion !== 'string') return lesion;
+  return lesion.includes(' of ') && lesion.includes('rib')
+    ? lesion.split(' of ')[1].trim()
+    : lesion;
 }
 
 function getLesionSortPlaceholder(lesion) {
@@ -1447,6 +1478,53 @@ function sortLesionsByCandidateOrder(lesions, order = window.lesionsCandidates |
       return orderResult !== 0 ? orderResult : a.index - b.index;
     })
     .map(item => item.lesion);
+}
+
+function parseRibLesion(lesion) {
+  const text = stripLesionExceptionNote(lesion).replace(/\s+/g, ' ').trim();
+  const lower = text.toLowerCase();
+  if (!/\bribs?\b/.test(lower)) return null;
+
+  const aspect = ['anterolateral', 'posterolateral', 'anterior', 'posterior', 'lateral']
+    .find(item => new RegExp(`\\b${item}\\s+aspects?\\s+of\\b`).test(lower)) || '';
+
+  const side = /\bbilateral\b/.test(lower)
+    ? 'bilateral'
+    : /\bleft\b/.test(lower)
+      ? 'left'
+      : /\bright\b/.test(lower)
+        ? 'right'
+        : 'bilateral';
+
+  const numberMatch = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)?(?:\s*-\s*(\d{1,2})(?:st|nd|rd|th)?)?\b/);
+  const start = numberMatch ? Number(numberMatch[1]) : 1;
+  const end = numberMatch ? Number(numberMatch[2] || numberMatch[1]) : 12;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end > 12 || start > end) {
+    return null;
+  }
+
+  return {
+    aspect,
+    sides: side === 'bilateral' ? ['left', 'right'] : [side],
+    numbers: Array.from({ length: end - start + 1 }, (_, index) => start + index)
+  };
+}
+
+function isSuperset(parentValues, childValues) {
+  return childValues.every(value => parentValues.includes(value));
+}
+
+function isRibLesionCoveredByParent(parent, lesion) {
+  if (normalizeLesionKey(parent) === normalizeLesionKey(lesion)) return false;
+
+  const parentRib = parseRibLesion(parent);
+  const childRib = parseRibLesion(lesion);
+  if (!parentRib || !childRib) return false;
+  if (!isSuperset(parentRib.sides, childRib.sides)) return false;
+  if (!isSuperset(parentRib.numbers, childRib.numbers)) return false;
+
+  if (parentRib.aspect === '') return true;
+  return childRib.aspect !== '' && parentRib.aspect === childRib.aspect;
 }
 
 const COMPLETE_SPINE_RANGES = {
@@ -1740,43 +1818,46 @@ function isLesionCoveredByParent(parent, lesion) {
     isMappedLesionCoveredByParent(parent, lesion);
 }
 
+function isLesionCoveredByParentForException(parent, lesion) {
+  return isLesionCoveredByParent(parent, lesion) ||
+    isRibLesionCoveredByParent(parent, lesion);
+}
+
 function filterCoveredLesions(lesions) {
   return lesions.filter(lesion => {
     return !lesions.some(parent => isLesionCoveredByParent(parent, lesion));
   });
 }
 
-function addImpressionLesionExceptionNotes(rows) {
-  const { LESIONS, CHANGES, IMPRESSIONS } = COLUMN_INDICES;
-  const rowsByImpression = rows.reduce((groups, row, index) => {
-    const impression = row?.[IMPRESSIONS];
-    if (!impression || typeof impression !== 'string') return groups;
-    if (!groups.has(impression)) groups.set(impression, []);
-    groups.get(impression).push({ row, index });
-    return groups;
-  }, new Map());
-
+function addLesionExceptionNotes(rows, shouldAnnotateParentChild, coverageRows = rows, displayRows = rows, options = {}) {
+  const { LESIONS } = COLUMN_INDICES;
   const exceptionsByIndex = new Map();
+  const formatParenthetical = options.formatParenthetical || ((exceptions) =>
+    `except ${formatSeries(exceptions, ', ')}`
+  );
 
-  rowsByImpression.forEach(groupRows => {
-    groupRows.forEach(({ row: parentRow, index: parentIndex }) => {
-      const parentLesion = parentRow?.[LESIONS];
-      if (!parentLesion || typeof parentLesion !== 'string') return;
+  rows.forEach((parentRow, parentIndex) => {
+    const parentCoverageRow = coverageRows[parentIndex] || parentRow;
+    const parentLesion = parentCoverageRow?.[LESIONS];
+    if (!parentLesion || typeof parentLesion !== 'string') return;
 
-      groupRows.forEach(({ row: childRow }) => {
-        const childLesion = childRow?.[LESIONS];
-        if (!childLesion || typeof childLesion !== 'string') return;
-        if (parentRow[CHANGES] === childRow[CHANGES]) return;
-        if (!isLesionCoveredByParent(parentLesion, childLesion)) return;
+    rows.forEach((childRow, childIndex) => {
+      const childCoverageRow = coverageRows[childIndex] || childRow;
+      const childLesion = childCoverageRow?.[LESIONS];
+      const childDisplayRow = displayRows[childIndex] || childRow;
+      const childDisplayLesion = childDisplayRow?.[LESIONS] || childLesion;
+      if (!childLesion || typeof childLesion !== 'string') return;
+      if (!childDisplayLesion || typeof childDisplayLesion !== 'string') return;
+      if (!shouldAnnotateParentChild(parentRow, childRow)) return;
+      if (!isLesionCoveredByParentForException(parentLesion, childLesion)) return;
 
-        if (!exceptionsByIndex.has(parentIndex)) {
-          exceptionsByIndex.set(parentIndex, []);
-        }
-        const exceptions = exceptionsByIndex.get(parentIndex);
-        if (!exceptions.some(exception => normalizeLesionKey(exception) === normalizeLesionKey(childLesion))) {
-          exceptions.push(childLesion);
-        }
-      });
+      if (!exceptionsByIndex.has(parentIndex)) {
+        exceptionsByIndex.set(parentIndex, []);
+      }
+      const exceptions = exceptionsByIndex.get(parentIndex);
+      if (!exceptions.some(exception => normalizeLesionKey(exception) === normalizeLesionKey(childDisplayLesion))) {
+        exceptions.push(childDisplayLesion);
+      }
     });
   });
 
@@ -1786,9 +1867,25 @@ function addImpressionLesionExceptionNotes(rows) {
 
     const rowCopy = shallowCopyRow(row);
     const sortedExceptions = sortLesionsByCandidateOrder(exceptions);
-    rowCopy[LESIONS] = `${stripLesionExceptionNote(rowCopy[LESIONS])} (except ${formatSeries(sortedExceptions, ', ')})`;
+    const parenthetical = formatParenthetical(sortedExceptions, {
+      row,
+      rowCopy,
+      index,
+      coverageRow: coverageRows[index] || row
+    });
+    if (!parenthetical) return rowCopy;
+    rowCopy[LESIONS] = `${stripLesionExceptionNote(rowCopy[LESIONS])} (${parenthetical})`;
     return rowCopy;
   });
+}
+
+function formatRibAwareExceptionParenthetical(exceptions, { coverageRow }) {
+  const { LESIONS } = COLUMN_INDICES;
+  const parentLesion = coverageRow?.[LESIONS];
+  if (parentLesion && typeof parentLesion === 'string' && parseRibLesion(parentLesion)) {
+    return `except for ${formatSeries(mergeLesionsAnatomies(exceptions), ', ')}`;
+  }
+  return `except ${formatSeries(exceptions, ', ')}`;
 }
 
 // 合併病灶解剖結構 - 完全按照 Google Apps Script 版本
@@ -1819,7 +1916,12 @@ function mergeLesionsAnatomies(lesions) {
     return word + 's';
   }
 
-  lesions.forEach(lesion => { 
+  lesions.forEach(lesion => {
+    if (hasLesionExceptionNote(lesion)) {
+      newLesions.push(lesion);
+      return;
+    }
+
     if (lesion.includes('rib')) {
       if (!newLesions.includes('{ribs}')) {
         newLesions.push('{ribs}')
@@ -2185,6 +2287,91 @@ function assembleItems(classifiedLesions, categories) {
   return items;
 }
 
+function replaceRowColumn(row, columnIndex, value) {
+  return [...row.slice(0, columnIndex), value, ...row.slice(columnIndex + 1)];
+}
+
+function escapeRegExp(value) {
+  return `${value || ''}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripLeadingRadioactivityTemplate(text, template) {
+  const normalizedText = `${text || ''}`;
+  const prefix = `${template || ''}`.replace('{}', '').replace(/\s+/g, ' ').trim();
+  if (!prefix) return normalizedText.trim();
+
+  const prefixBoundary = /\bin$/i.test(prefix) ? '(?:\\s+the\\s+|\\s+)' : '\\s*';
+  return normalizedText
+    .replace(new RegExp(`^${escapeRegExp(prefix)}${prefixBoundary}`, 'i'), '')
+    .trim();
+}
+
+function getRadioactivityTemplateKeysByChange(rows, changeIndex, radioactivityIndex) {
+  const keysByChange = {};
+
+  (rows || []).forEach(row => {
+    const change = row?.[changeIndex] || '';
+    const template = `${row?.[radioactivityIndex] || ''}`.replace(/\s+/g, ' ').trim();
+    if (!template) return;
+
+    if (!keysByChange[change]) keysByChange[change] = [];
+    if (!keysByChange[change].includes(template)) {
+      keysByChange[change].push(template);
+    }
+  });
+
+  Object.keys(keysByChange).forEach(change => {
+    keysByChange[change] = keysByChange[change].sort((a, b) =>
+      compareByOrder(a, b, window.radioactivitiesCandidates || [])
+    );
+  });
+
+  return keysByChange;
+}
+
+function suppressRepeatedRadioactivityTemplates(fullFindingByChange, changesFindings, radioactivityTemplateKeysByChange) {
+  let previousLastRadioactivityTemplate = '';
+
+  changesFindings.filter(change => change !== '').forEach(change => {
+    if (getChangePlaceholderMode(change) !== 'full-finding') {
+      previousLastRadioactivityTemplate = '';
+      return;
+    }
+
+    const currentTemplates = radioactivityTemplateKeysByChange[change] || [];
+    const firstCurrentTemplate = currentTemplates[0] || '';
+    if (firstCurrentTemplate && firstCurrentTemplate === previousLastRadioactivityTemplate) {
+      fullFindingByChange[change] = stripLeadingRadioactivityTemplate(
+        fullFindingByChange[change],
+        previousLastRadioactivityTemplate
+      );
+    }
+
+    previousLastRadioactivityTemplate = currentTemplates.at(-1) || '';
+  });
+}
+
+function getChangePlaceholderText(change, fullFindingByChange, lesionOnlyByChange) {
+  const source = getChangePlaceholderMode(change) === 'full-finding'
+    ? fullFindingByChange
+    : lesionOnlyByChange;
+  return `${source[change] ?? fullFindingByChange[change] ?? ''}`.trim();
+}
+
+function formatSeparatedChange(change, lesionText) {
+  const lesion = `${lesionText || ''}`.trim();
+  const changeText = `${change || ''}`
+    .replace('newly noted', hasMultipleEnumeratedItems(lesion) ? 'new lesions' : 'new lesion')
+    .replace(' in ', ' ')
+    .replace(' the ', ' ')
+    .replace('{}', '')
+    .replace(',', '')
+    .replace(';', '')
+    .trim();
+
+  return lesion ? `${changeText} in ${lesion}` : changeText;
+}
+
 // 主要報告生成函數 - 完全按照 Google Apps Script 版本
 function getReport(tableData, examDate) {
   const { LESIONS, RADIOACTIVITIES, CHANGES, IMPRESSIONS } = COLUMN_INDICES;
@@ -2344,40 +2531,46 @@ function getReport(tableData, examDate) {
 
   result.lesions = resultLesionsCopy
 
-  let assembleFindings = assembleItems(getClassifiedLesions(result.lesions, ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']), ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']);
-  const lesionsWithoutChanges = result.lesions.map(row => [...row.slice(0, CHANGES), '', ...row.slice(CHANGES + 1)]);
+  const findingsDisplayRows = result.lesions.map(row => replaceRowColumn(row, LESIONS, shortenRibAspectLesion(row[LESIONS])));
+  const findingsRows = addLesionExceptionNotes(
+    result.lesions,
+    (parentRow, childRow) =>
+      parentRow[CHANGES] !== childRow[CHANGES] ||
+      parentRow[RADIOACTIVITIES] !== childRow[RADIOACTIVITIES],
+    result.lesions,
+    findingsDisplayRows,
+    {
+      formatParenthetical: formatRibAwareExceptionParenthetical
+    }
+  );
+
+  let assembleFindings = assembleItems(getClassifiedLesions(findingsRows, ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']), ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']);
+  const lesionOnlyRows = findingsRows.map(row => replaceRowColumn(row, RADIOACTIVITIES, '{}'));
+  const lesionOnlyByChange = assembleItems(
+    getClassifiedLesions(lesionOnlyRows, ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']),
+    ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']
+  );
+  const separatedLesionOnlyRows = result.lesions.map(row => replaceRowColumn(row, RADIOACTIVITIES, '{}'));
+  const separatedLesionOnlyByChange = assembleItems(
+    getClassifiedLesions(separatedLesionOnlyRows, ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']),
+    ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']
+  );
+  const visibleCurrentLesions = result.lesions.filter(row => !isResolvedChange(row[CHANGES]));
+  const lesionsWithoutChanges = visibleCurrentLesions.map(row => replaceRowColumn(row, CHANGES, ''));
   const assembleRadioactivitiesSeparated = assembleItems(
     getClassifiedLesions(lesionsWithoutChanges, ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']),
     ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']
   );
-  const lesionsWithGenericRadioactivity = result.lesions.map(
-    row => [...row.slice(0, RADIOACTIVITIES), 'increased radioactivity in {}', ...row.slice(RADIOACTIVITIES + 1)]
-  );
-  const assembleChangesSeparated = assembleItems(
-    getClassifiedLesions(lesionsWithGenericRadioactivity, ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']),
-    ['CHANGES', 'RADIOACTIVITIES', 'LESIONS']
-  );
+  const radioactivityTemplateKeysByChange = getRadioactivityTemplateKeysByChange(findingsRows, CHANGES, RADIOACTIVITIES);
 
   let changesFindings = Object.keys(assembleFindings)
 
-  let previousLastRadioactivity = '';
-  let radioactivities = (window.radioactivitiesCandidates || []).map(x => x.replace("{}", "").trim());
+  suppressRepeatedRadioactivityTemplates(assembleFindings, changesFindings, radioactivityTemplateKeysByChange);
 
-  changesFindings.filter(x => x != "").forEach(key => {
-    let currentRadioactivities = radioactivities.filter(radioactivity => assembleFindings[key].includes(radioactivity));
-    if (currentRadioactivities.at(0) == previousLastRadioactivity) {
-      assembleFindings[key] = assembleFindings[key].replace(previousLastRadioactivity, '').trim();
-    }
-    previousLastRadioactivity = currentRadioactivities.at(-1);
-  })
-
+  const lesionsImpressionCoverageRows = result.lesions.map(shallowCopyRow);
   let lesionsImpressions = result.lesions.map(row => {
     const rowCopy = shallowCopyRow(row);
-    if (rowCopy[LESIONS] && typeof rowCopy[LESIONS] === 'string') {
-      rowCopy[LESIONS] = (rowCopy[LESIONS].includes(' of ') && rowCopy[LESIONS].includes('rib'))
-        ? rowCopy[LESIONS].split(' of ')[1].trim()
-        : rowCopy[LESIONS];
-    }
+    rowCopy[LESIONS] = shortenRibAspectLesion(rowCopy[LESIONS]);
     return rowCopy;
   });
   lesionsImpressions.forEach((lesion, index) => {
@@ -2385,6 +2578,7 @@ function getReport(tableData, examDate) {
     if (lesion[IMPRESSIONS] && typeof lesion[IMPRESSIONS] === 'string') {
       if (!['etastas', 'involvement', 'athologic', 'eactive', 'one lesion'].some(x => lesion[IMPRESSIONS].includes(x)) || lesion[IMPRESSIONS].includes('uspicious')) {
         lesionsImpressions[index][CHANGES] = '';
+        lesionsImpressionCoverageRows[index][CHANGES] = '';
       }
     }
   })
@@ -2405,9 +2599,20 @@ function getReport(tableData, examDate) {
         ? currentChange
         : mappingChangeInverse[currentChange] ??
       currentChange;
+    lesionsImpressionCoverageRows[index][CHANGES] = lesionsImpressions[index][CHANGES];
   })
 
-  lesionsImpressions = addImpressionLesionExceptionNotes(lesionsImpressions);
+  lesionsImpressions = addLesionExceptionNotes(
+    lesionsImpressions,
+    (parentRow, childRow) =>
+      parentRow[IMPRESSIONS] !== childRow[IMPRESSIONS] ||
+      parentRow[CHANGES] !== childRow[CHANGES],
+    lesionsImpressionCoverageRows,
+    lesionsImpressions,
+    {
+      formatParenthetical: formatRibAwareExceptionParenthetical
+    }
+  );
 
   let assembleImpressions = assembleItems(getClassifiedLesions(lesionsImpressions, ['IMPRESSIONS', 'CHANGES', 'LESIONS']), ['IMPRESSIONS', 'CHANGES', 'LESIONS']);
 
@@ -2415,22 +2620,22 @@ function getReport(tableData, examDate) {
     assembleImpressions[impression] = assembleImpressions[impression].replace(/;;/g, ';')
   })
 
-  const formatFindings = (changesFindings, assembleFindings, result) => {
+  const getOrderedChanges = (changes) => {
+    const changesOrder = Object.keys(window.changesCandidates || {});
+    const orderedChanges = changesOrder.filter(change => changes.includes(change));
+    const unorderedChanges = changes.filter(change => !changesOrder.includes(change) && change !== '');
+    return [...orderedChanges, ...unorderedChanges];
+  };
+
+  const formatFindings = (changesFindings, assembleFindings) => {
     if (changesFindings.includes('') && changesFindings.length === 1) {
       return appendAppendixText(`Tc-99m MDP whole body bone scan shows ${assembleFindings[''].trim()}.`, appendixText);
     }
 
-    const getOrderedChanges = () => {
-      const changesOrder = Object.keys(window.changesCandidates || {});
-      const orderedChanges = changesOrder.filter(change => changesFindings.includes(change));
-      const unorderedChanges = changesFindings.filter(change => !changesOrder.includes(change) && change !== '');
-      return [...orderedChanges, ...unorderedChanges];
-    };
-
-    const formatChanges = () => getOrderedChanges()
+    const formatChanges = () => getOrderedChanges(changesFindings)
       .map(change => ({
         change,
-        text: change.replace('{}', assembleFindings[change])
+        text: change.replace('{}', getChangePlaceholderText(change, assembleFindings, lesionOnlyByChange))
       }))
       .reduce((parts, item, index, items) => {
         const separator = index > 0 && getFindingsChangeGroup(items[index - 1].change) !== getFindingsChangeGroup(item.change)
@@ -2450,23 +2655,28 @@ function getReport(tableData, examDate) {
     return appendAppendixText(`Tc-99m MDP whole body bone scan shows ${allFindings}; ${comparisonReference}.`, appendixText);
   };
 
-  function formatFindingsSeparated (changesFindings, result) {
-    let findingsSeparated = [`Tc-99m MDP whole body bone scan shows ${assembleRadioactivitiesSeparated['']}.`];
+  function formatFindingsSeparated (changesFindings) {
+    const currentFindings = `${assembleRadioactivitiesSeparated[''] || ''}`.trim();
+    let findingsSeparated = [
+      currentFindings
+        ? `Tc-99m MDP whole body bone scan shows ${currentFindings}.`
+        : 'Tc-99m MDP whole body bone scan shows no abnormal increased radioactivity.'
+    ];
+
     if (!(changesFindings.includes('') && changesFindings.length === 1)) {
-      const changesOrder = Object.keys(window.changesCandidates || {});
       findingsSeparated.push(
         `${capitalizeFirstLetter(comparisonReference)}, this study shows ` +
-        changesOrder.filter(x => x != '' && Object.keys(assembleChangesSeparated).includes(x)).map(
-        change => change.replace('newly noted', hasMultipleEnumeratedItems(assembleChangesSeparated[change]) ? 'new lesions' : 'new lesion').replace(' in ', ' ').replace(' the ', ' ').replace('{}', '').replace(',', '').replace(';', '').trim() + ' in ' + stripGenericRadioactivityPrefix(assembleChangesSeparated[change])
-      ).join('; ') + '.'
+        getOrderedChanges(changesFindings).filter(change => change !== '').map(
+          change => formatSeparatedChange(change, separatedLesionOnlyByChange[change])
+        ).join('; ') + '.'
       )
     }
     findingsSeparated.push(appendixText)
     return findingsSeparated.filter(x => x != '').join('\n\n')
   }
   
-  let textFindings = formatFindings(changesFindings, assembleFindings, result);
-  let textFindingsSeparated = formatFindingsSeparated(changesFindings, result);
+  let textFindings = formatFindings(changesFindings, assembleFindings);
+  let textFindingsSeparated = formatFindingsSeparated(changesFindings);
 
   textFindings = textFindings.split('\n').map(x => (x.startsWith('Faint spots') || x.startsWith('Tiny spots') || x.startsWith('Cold areas')) ? x.replace('is also', 'are also') : x).join("\n");
   textFindings = changesFindings.filter(change => change != '').length > 1 ? textFindings : textFindings.replace('; in comparison', ' in comparison')
