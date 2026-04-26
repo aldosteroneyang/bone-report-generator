@@ -174,9 +174,11 @@ window.impressionsCandidates = [
   "Suspect enthesopathy in {}.",
   "Suspect hypertrophic pulmonary osteoarthropathy in {}.",
   "Faint bone lesion in {}, follow-up bone scan is recommended.",
+  "Faint bone lesion in {}, follow-up bone scan is recommended to exclude bone metastasis.",
   "Faint bone lesion in {}, possibly non-specific finding.",
   "Faint bone lesion in {}, possibly previous insult.",
   "Doubtful bone lesion in {}, follow-up bone scan is recommended.",
+  "Doubtful bone lesion in {}, follow-up bone scan is recommended to exclude bone metastasis.",
   "Doubtful bone lesion in {}, possibly non-specific finding.",
   "Doubtful bone lesion in {}, possibly previous insult.",
 ];
