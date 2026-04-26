@@ -52,6 +52,10 @@ WEBNM mapping for MCIID `9310401`:
 
 When opened by `gui-report-extension`, draft state is scoped by `referno` and cached for 5 days through extension-owned `chrome.storage.local`. Standalone localStorage fallback is also scoped instead of using a shared `tableData` key.
 
+Column visibility and table/report pane ratio preferences are stored as user-level local settings, not per patient. `Previous Impression` is a local reference column for parsed prior-report context and is not included in the returned `Keyword` payload.
+
+Table draft data is short-lived and versioned. The app only loads the latest `TABLE_DATA_SCHEMA_VERSION`; older, future, missing, or malformed table data is intentionally rejected instead of migrated. User preferences such as column visibility and pane ratio remain separate and reset leniently when invalid.
+
 ## Local Use
 
 Open `index.html` directly, or serve the folder with any static file server.

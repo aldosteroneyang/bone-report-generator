@@ -13,6 +13,7 @@
   <script src="lesions.js"></script>
   <script src="appendices.js"></script>
   <script src="lesionCanonicalizer.js"></script>
+  <script src="previousReportParser.js"></script>
   <script src="changes.js"></script>
   <script src="impressions.js"></script>
   
@@ -116,6 +117,71 @@
     .action-group {
       justify-content: flex-end;
     }
+    .column-menu-wrapper {
+      position: relative;
+      display: inline-flex;
+    }
+    .column-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      width: 236px;
+      max-height: min(420px, calc(100vh - 120px));
+      overflow: auto;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+      z-index: 900;
+    }
+    .column-menu[hidden] {
+      display: none;
+    }
+    .column-menu-header {
+      padding: 2px 4px 8px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .column-menu-options {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .column-menu-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+      padding: 3px 4px;
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.25;
+      cursor: pointer;
+    }
+    .column-menu-option:hover {
+      background: var(--accent-soft);
+    }
+    .column-menu-option input {
+      margin: 0;
+      flex: 0 0 auto;
+    }
+    .column-menu-actions {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      padding-top: 8px;
+      margin-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+    .column-menu-actions .copy-btn {
+      border-radius: var(--radius);
+      flex: 1 1 auto;
+    }
     .previous-report-bar {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 168px;
@@ -187,10 +253,47 @@
     }
     .main-container {
       display: grid;
-      grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
-      gap: 12px;
+      grid-template-columns: minmax(0, 1.08fr) 8px minmax(0, 0.92fr);
+      gap: 6px;
       flex: 1 1 auto;
       min-height: 0;
+    }
+    .pane-resizer {
+      position: relative;
+      align-self: stretch;
+      min-width: 8px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      cursor: col-resize;
+      touch-action: none;
+      padding: 0;
+    }
+    .pane-resizer::before {
+      content: "";
+      position: absolute;
+      top: 12px;
+      bottom: 12px;
+      left: 3px;
+      width: 2px;
+      border-radius: 999px;
+      background: var(--border-strong);
+      opacity: 0.65;
+      transition: opacity 0.15s ease, background-color 0.15s ease;
+    }
+    .pane-resizer:hover::before,
+    .pane-resizer:focus-visible::before,
+    body.pane-resizing .pane-resizer::before {
+      background: var(--accent);
+      opacity: 0.9;
+    }
+    .pane-resizer:focus-visible {
+      outline: 2px solid var(--border-strong);
+      outline-offset: 2px;
+    }
+    body.pane-resizing {
+      cursor: col-resize;
+      user-select: none;
     }
     .table-container {
       min-width: 0;
@@ -432,6 +535,9 @@
       .main-container {
         grid-template-columns: 1fr;
       }
+      .pane-resizer {
+        display: none;
+      }
       .toolbar {
         grid-template-columns: 1fr;
         align-items: stretch;
@@ -488,6 +594,17 @@
           <button id="saveBtn" class="btn">儲存</button>
           <button id="loadBtn" class="btn">載入</button>
           <button id="exportBtn" class="btn">CSV</button>
+          <div class="column-menu-wrapper" id="columnMenuWrapper">
+            <button id="columnsMenuBtn" class="btn" type="button" aria-expanded="false" aria-controls="columnsMenu">Columns</button>
+            <div id="columnsMenu" class="column-menu" hidden>
+              <div class="column-menu-header">Columns</div>
+              <div id="columnsMenuOptions" class="column-menu-options"></div>
+              <div class="column-menu-actions">
+                <button id="showAllColumnsBtn" class="copy-btn" type="button">Show all</button>
+                <button id="resetColumnsBtn" class="copy-btn" type="button">Reset</button>
+              </div>
+            </div>
+          </div>
           <button id="loadTestDataBtn" class="btn btn-subtle">測試</button>
           <button id="clearBtn" class="btn btn-warning">清除</button>
         </div>
@@ -513,7 +630,7 @@
       <div class="table-container">
         <div id="hot"></div>
       </div>
-      
+      <button id="paneResizer" class="pane-resizer" type="button" aria-label="調整表格與報告寬度" aria-orientation="vertical" title="拖曳調整表格與報告寬度"></button>
       <div class="report-container">
         <div id="reportSection" style="display: none;">
           <div class="report-item">
@@ -669,15 +786,16 @@
     
     // 原始欄位設定，只需指定 src（例如 "radioactivities.js"）或直接指定 type
     const rawColumnConfigs = [
-      { title: 'Radioactivities', src: 'radioactivities.js', proportion: 1 },
-      { title: 'Lesions',         src: 'lesions.js',         proportion: 1, sortByLength: true },
-      { title: 'Changes',         src: 'changes.js',         proportion: 1, sortByLength: true },
-      { title: 'Impressions',     src: 'impressions.js',     proportion: 3, sortByLength: true },
-      { title: 'Note',            type: 'text',             proportion: 1.5 },
-      { title: 'S',               type: 'text',             proportion: 0.2 },
-      { title: 'I',               type: 'text',             proportion: 0.2 },
-      { title: 'X',               type: 'text',             proportion: 0.2 },
-      { title: 'Y',               type: 'text',             proportion: 0.2 }
+      { key: 'radioactivities',     title: 'Radioactivities',      src: 'radioactivities.js', proportion: 1 },
+      { key: 'lesions',             title: 'Lesions',              src: 'lesions.js',         proportion: 1, sortByLength: true },
+      { key: 'changes',             title: 'Changes',              src: 'changes.js',         proportion: 1, sortByLength: true },
+      { key: 'impressions',         title: 'Impressions',          src: 'impressions.js',     proportion: 3, sortByLength: true },
+      { key: 'previousImpression',  title: 'Previous Impression',  type: 'text',             proportion: 1.8 },
+      { key: 'note',                title: 'Note',                 type: 'text',             proportion: 1.5 },
+      { key: 's',                   title: 'S',                    type: 'text',             proportion: 0.2 },
+      { key: 'i',                   title: 'I',                    type: 'text',             proportion: 0.2 },
+      { key: 'x',                   title: 'X',                    type: 'text',             proportion: 0.2 },
+      { key: 'y',                   title: 'Y',                    type: 'text',             proportion: 0.2 }
     ];
     
     // 透過 configMyColumns 處理後，得到完整的欄位設定
@@ -687,11 +805,12 @@
       LESIONS: 1,
       CHANGES: 2,
       IMPRESSIONS: 3,
-      NOTE: 4,
-      S: 5,
-      I: 6,
-      X: 7,
-      Y: 8
+      PREVIOUS_IMPRESSION: 4,
+      NOTE: 5,
+      S: 6,
+      I: 7,
+      X: 8,
+      Y: 9
     };
     const BONE_SCAN_PROCEDURE = 'A bone scan consisting of whole body and/or spot views is obtained by gamma camera with low energy high resolution collimator 3 hours after the intravenous injection of 20 mCi of Tc-99m MDP.';
     const PARSER_MODE = {
@@ -750,6 +869,22 @@
     
     // 取得欄位標題
     const baseColHeaders = myColumns.map(col => col.title);
+    const columnKeys = myColumns.map((col, index) => col.key || baseColHeaders[index] || String(index));
+    const TABLE_DATA_SCHEMA_VERSION = 2;
+    const COLUMN_VISIBILITY_STORAGE_KEY = 'boneReportGenerator:columnVisibility';
+    const MAIN_PANE_RATIO_STORAGE_KEY = 'boneReportGenerator:mainPaneRatio';
+    const INCOMPATIBLE_TABLE_DATA_MESSAGE = '舊版暫存資料已略過，請重新解析或重新載入';
+    const DEFAULT_HIDDEN_COLUMN_KEYS = new Set(['previousImpression']);
+    const DEFAULT_MAIN_PANE_RATIO = 0.54;
+    const MIN_MAIN_PANE_RATIO = 0.35;
+    const MAX_MAIN_PANE_RATIO = 0.75;
+    const STACKED_LAYOUT_MEDIA_QUERY = '(max-width: 1100px)';
+    let storedHiddenColumnKeys = loadStoredHiddenColumnKeys();
+    let currentMainPaneRatio = loadMainPaneRatio();
+    let paneResizeActive = false;
+    let paneLayoutFrame = null;
+    const transientVisibleColumnKeys = new Set();
+    let appliedHiddenColumnKeys = new Set(getActiveHiddenColumnKeys());
     const SORTABLE_COLUMN_INDEXES = new Set([
       COLUMN_INDEX.RADIOACTIVITIES,
       COLUMN_INDEX.LESIONS,
@@ -762,7 +897,7 @@
     };
     const colHeaders = index => getColumnHeader(index);
     const container = document.getElementById('hot');
-    const minColumnWidths = [120, 138, 106, 240, 120, 38, 38, 38, 38];
+    const minColumnWidths = [120, 138, 106, 240, 180, 120, 38, 38, 38, 38];
     const DEFAULT_RADIOACTIVITY = 'increased radioactivity in {}';
     const AUTOFILL_DEFAULT_RADIOACTIVITY_SOURCE = 'autofillDefaultRadioactivity';
     const APPENDIX_RADIOACTIVITY_CLEAR_SOURCE = 'appendixRadioactivityClear';
@@ -791,6 +926,353 @@
     ]);
     let selectedParserMode = PARSER_MODE.API;
     let resolvedParserMode = PARSER_MODE.API;
+
+    function sanitizeColumnKeys(keys) {
+      const validKeys = new Set(columnKeys);
+      return new Set(
+        Array.from(keys || [])
+          .map(key => String(key || '').trim())
+          .filter(key => validKeys.has(key))
+      );
+    }
+
+    function columnKeyToIndex(key) {
+      return columnKeys.indexOf(key);
+    }
+
+    function columnIndexToKey(index) {
+      return columnKeys[index] || '';
+    }
+
+    function loadStoredHiddenColumnKeys() {
+      try {
+        const saved = localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY);
+        if (!saved) {
+          return new Set(DEFAULT_HIDDEN_COLUMN_KEYS);
+        }
+
+        const parsed = JSON.parse(saved);
+        const savedKeys = Array.isArray(parsed)
+          ? parsed
+          : Array.isArray(parsed?.hiddenColumnKeys)
+            ? parsed.hiddenColumnKeys
+            : Array.isArray(parsed?.hiddenColumns)
+              ? parsed.hiddenColumns.map(index => columnIndexToKey(Number(index)))
+              : null;
+
+        return savedKeys ? sanitizeColumnKeys(savedKeys) : new Set(DEFAULT_HIDDEN_COLUMN_KEYS);
+      } catch (error) {
+        console.warn('欄位顯示設定載入失敗:', error);
+        return new Set(DEFAULT_HIDDEN_COLUMN_KEYS);
+      }
+    }
+
+    function persistColumnVisibility() {
+      try {
+        localStorage.setItem(COLUMN_VISIBILITY_STORAGE_KEY, JSON.stringify({
+          hiddenColumnKeys: Array.from(storedHiddenColumnKeys)
+        }));
+      } catch (error) {
+        console.warn('欄位顯示設定儲存失敗:', error);
+      }
+    }
+
+    function getActiveHiddenColumnKeys() {
+      return new Set(
+        Array.from(storedHiddenColumnKeys)
+          .filter(key => !transientVisibleColumnKeys.has(key))
+      );
+    }
+
+    function getActiveHiddenColumnIndexes() {
+      return Array.from(getActiveHiddenColumnKeys())
+        .map(columnKeyToIndex)
+        .filter(index => index >= 0)
+        .sort((a, b) => a - b);
+    }
+
+    function isColumnVisible(columnIndex) {
+      return !getActiveHiddenColumnKeys().has(columnIndexToKey(columnIndex));
+    }
+
+    function renderColumnMenuOptions() {
+      const optionsContainer = document.getElementById('columnsMenuOptions');
+      if (!optionsContainer) return;
+
+      optionsContainer.replaceChildren();
+      baseColHeaders.forEach((header, index) => {
+        const key = columnIndexToKey(index);
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input');
+        const text = document.createElement('span');
+
+        label.className = 'column-menu-option';
+        checkbox.type = 'checkbox';
+        checkbox.checked = isColumnVisible(index);
+        checkbox.addEventListener('change', () => {
+          setColumnHidden(key, !checkbox.checked, { persist: true });
+        });
+        text.textContent = header;
+
+        label.appendChild(checkbox);
+        label.appendChild(text);
+        optionsContainer.appendChild(label);
+      });
+    }
+
+    function columnKeysToIndexes(keys) {
+      return Array.from(keys || [])
+        .map(columnKeyToIndex)
+        .filter(index => index >= 0)
+        .sort((a, b) => a - b);
+    }
+
+    function syncHiddenColumnsPlugin(nextHiddenColumnKeys) {
+      if (typeof hot === 'undefined' || !hot) return;
+
+      const hiddenColumnsPlugin = hot.getPlugin?.('hiddenColumns');
+      if (!hiddenColumnsPlugin) return;
+
+      const nextHiddenKeys = sanitizeColumnKeys(nextHiddenColumnKeys);
+      const columnsToShow = columnKeysToIndexes(
+        Array.from(appliedHiddenColumnKeys).filter(key => !nextHiddenKeys.has(key))
+      );
+      const columnsToHide = columnKeysToIndexes(
+        Array.from(nextHiddenKeys).filter(key => !appliedHiddenColumnKeys.has(key))
+      );
+
+      if (columnsToShow.length > 0 && typeof hiddenColumnsPlugin.showColumns === 'function') {
+        hiddenColumnsPlugin.showColumns(columnsToShow);
+      }
+      if (columnsToHide.length > 0 && typeof hiddenColumnsPlugin.hideColumns === 'function') {
+        hiddenColumnsPlugin.hideColumns(columnsToHide);
+      }
+      appliedHiddenColumnKeys = nextHiddenKeys;
+    }
+
+    function applyColumnVisibility({ persist = false, notify = '' } = {}) {
+      if (persist) {
+        persistColumnVisibility();
+      }
+
+      if (typeof hot !== 'undefined' && hot) {
+        const hiddenColumnKeys = getActiveHiddenColumnKeys();
+        const hiddenColumnIndexes = columnKeysToIndexes(hiddenColumnKeys);
+        hot.updateSettings({
+          hiddenColumns: {
+            columns: hiddenColumnIndexes,
+            indicators: true
+          },
+          colWidths: index => calculateColWidth(index)
+        });
+        syncHiddenColumnsPlugin(hiddenColumnKeys);
+        hot.render();
+      }
+
+      renderColumnMenuOptions();
+      if (notify) {
+        showNotification(notify);
+      }
+    }
+
+    function setColumnHidden(key, hidden, { persist = true } = {}) {
+      const columnKey = String(key || '');
+      if (!columnKeys.includes(columnKey)) return;
+
+      transientVisibleColumnKeys.delete(columnKey);
+      if (hidden) {
+        storedHiddenColumnKeys.add(columnKey);
+      } else {
+        storedHiddenColumnKeys.delete(columnKey);
+      }
+      applyColumnVisibility({ persist });
+    }
+
+    function showAllColumns() {
+      storedHiddenColumnKeys = new Set();
+      transientVisibleColumnKeys.clear();
+      applyColumnVisibility({ persist: true, notify: '所有欄位已顯示' });
+    }
+
+    function resetColumnVisibility() {
+      storedHiddenColumnKeys = new Set(DEFAULT_HIDDEN_COLUMN_KEYS);
+      transientVisibleColumnKeys.clear();
+      applyColumnVisibility({ persist: true, notify: '欄位顯示已重設' });
+    }
+
+    function autoShowColumns(keys) {
+      sanitizeColumnKeys(keys).forEach(key => {
+        transientVisibleColumnKeys.add(key);
+      });
+      applyColumnVisibility({ persist: false });
+    }
+
+    function toggleColumnMenu(forceOpen = null) {
+      const menu = document.getElementById('columnsMenu');
+      const button = document.getElementById('columnsMenuBtn');
+      if (!menu || !button) return;
+
+      const shouldOpen = forceOpen === null ? menu.hidden : Boolean(forceOpen);
+      menu.hidden = !shouldOpen;
+      button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+      if (shouldOpen) {
+        renderColumnMenuOptions();
+      }
+    }
+
+    function clampNumber(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function loadMainPaneRatio() {
+      const savedRatio = Number(localStorage.getItem(MAIN_PANE_RATIO_STORAGE_KEY));
+      return Number.isFinite(savedRatio)
+        ? clampNumber(savedRatio, MIN_MAIN_PANE_RATIO, MAX_MAIN_PANE_RATIO)
+        : DEFAULT_MAIN_PANE_RATIO;
+    }
+
+    function isStackedPaneLayout() {
+      return window.matchMedia(STACKED_LAYOUT_MEDIA_QUERY).matches;
+    }
+
+    function scheduleHotLayoutRefresh() {
+      if (paneLayoutFrame !== null) return;
+      paneLayoutFrame = window.requestAnimationFrame(() => {
+        paneLayoutFrame = null;
+        if (typeof hot === 'undefined' || !hot) return;
+        hot.updateSettings({
+          colWidths: index => calculateColWidth(index)
+        });
+        hot.render();
+      });
+    }
+
+    function applyMainPaneRatio() {
+      const mainContainer = document.querySelector('.main-container');
+      if (!mainContainer) return;
+
+      if (isStackedPaneLayout()) {
+        mainContainer.style.gridTemplateColumns = '';
+        return;
+      }
+
+      const tableRatio = clampNumber(currentMainPaneRatio, MIN_MAIN_PANE_RATIO, MAX_MAIN_PANE_RATIO);
+      mainContainer.style.gridTemplateColumns = `minmax(0, ${tableRatio}fr) 8px minmax(0, ${1 - tableRatio}fr)`;
+      scheduleHotLayoutRefresh();
+    }
+
+    function setMainPaneRatio(ratio, { persist = false } = {}) {
+      currentMainPaneRatio = clampNumber(Number(ratio), MIN_MAIN_PANE_RATIO, MAX_MAIN_PANE_RATIO);
+      if (persist) {
+        try {
+          localStorage.setItem(MAIN_PANE_RATIO_STORAGE_KEY, String(currentMainPaneRatio));
+        } catch (error) {
+          console.warn('Pane ratio 儲存失敗:', error);
+        }
+      }
+      applyMainPaneRatio();
+    }
+
+    function updateMainPaneRatioFromPointer(event, { persist = false } = {}) {
+      const mainContainer = document.querySelector('.main-container');
+      if (!mainContainer || isStackedPaneLayout()) return;
+
+      const rect = mainContainer.getBoundingClientRect();
+      if (rect.width <= 0) return;
+
+      setMainPaneRatio((event.clientX - rect.left) / rect.width, { persist });
+    }
+
+    function startPaneResize(event) {
+      if ((event.button ?? 0) !== 0 || isStackedPaneLayout()) return;
+
+      paneResizeActive = true;
+      document.body.classList.add('pane-resizing');
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      updateMainPaneRatioFromPointer(event);
+      event.preventDefault();
+    }
+
+    function movePaneResize(event) {
+      if (!paneResizeActive) return;
+      updateMainPaneRatioFromPointer(event);
+      event.preventDefault();
+    }
+
+    function finishPaneResize(event) {
+      if (!paneResizeActive) return;
+
+      paneResizeActive = false;
+      document.body.classList.remove('pane-resizing');
+      updateMainPaneRatioFromPointer(event, { persist: true });
+    }
+
+    function handlePaneResizerKeydown(event) {
+      if (isStackedPaneLayout()) return;
+      const step = event.shiftKey ? 0.06 : 0.03;
+
+      if (event.key === 'ArrowLeft') {
+        setMainPaneRatio(currentMainPaneRatio - step, { persist: true });
+        event.preventDefault();
+      } else if (event.key === 'ArrowRight') {
+        setMainPaneRatio(currentMainPaneRatio + step, { persist: true });
+        event.preventDefault();
+      }
+    }
+
+    function createBlankTableData() {
+      return Array.from({ length: DEFAULT_ROW_COUNT }, () => Array(myColumns.length).fill(''));
+    }
+
+    function normalizeCurrentTableRow(row) {
+      if (!Array.isArray(row)) {
+        throw new Error('暫存資料格式不正確');
+      }
+
+      const normalized = Array(myColumns.length).fill('');
+      for (let index = 0; index < Math.min(row.length, myColumns.length); index += 1) {
+        normalized[index] = row[index] ?? '';
+      }
+      return normalized;
+    }
+
+    function normalizeCurrentTableRows(rows) {
+      if (!Array.isArray(rows)) {
+        throw new Error('暫存資料格式不正確');
+      }
+      return rows.map(normalizeCurrentTableRow);
+    }
+
+    function assertCurrentTableSchemaVersion(schemaVersion) {
+      if (Number(schemaVersion) !== TABLE_DATA_SCHEMA_VERSION) {
+        throw new Error(INCOMPATIBLE_TABLE_DATA_MESSAGE);
+      }
+    }
+
+    function parseCurrentTablePayload(payload) {
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error(INCOMPATIBLE_TABLE_DATA_MESSAGE);
+      }
+
+      assertCurrentTableSchemaVersion(payload.schemaVersion);
+      return normalizeCurrentTableRows(payload.rows);
+    }
+
+    function parseCurrentGeneratorStateTableData(generatorState) {
+      assertCurrentTableSchemaVersion(generatorState?.tableDataSchemaVersion);
+      return normalizeCurrentTableRows(generatorState?.tableData);
+    }
+
+    function serializeTableData(rows) {
+      return {
+        schemaVersion: TABLE_DATA_SCHEMA_VERSION,
+        rows: normalizeCurrentTableRows(rows)
+      };
+    }
+
+    function persistTableData(rows) {
+      localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(serializeTableData(rows)));
+    }
 
     function normalizeSortValue(value) {
       return normalizeCandidateValue(value).toLowerCase().replace(/\.$/, '');
@@ -867,7 +1349,7 @@
     }
 
     function persistSortedTableData(sortedData) {
-      localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(sortedData));
+      persistTableData(sortedData);
       refreshReport({ silent: true });
       scheduleDraftSave();
     }
@@ -913,27 +1395,27 @@
     // 嘗試從本地儲存載入資料
     function getInitialData() {
       try {
-        const cachedTableData = getCachedGeneratorState().tableData;
-        if (Array.isArray(cachedTableData)) {
-          return cachedTableData;
+        const cachedGeneratorState = getCachedGeneratorState();
+        if (Object.prototype.hasOwnProperty.call(cachedGeneratorState, 'tableData')) {
+          return parseCurrentGeneratorStateTableData(cachedGeneratorState);
         }
 
         const savedData = localStorage.getItem(getScopedStorageKey('tableData'));
         if (savedData) {
-          return JSON.parse(savedData);
+          return parseCurrentTablePayload(JSON.parse(savedData));
         }
       } catch (e) {
         console.error('載入儲存資料失敗', e);
+        showNotification(INCOMPATIBLE_TABLE_DATA_MESSAGE, true);
       }
-      // 默認返回空白表格
-      return Array.from({ length: DEFAULT_ROW_COUNT }, () => Array(myColumns.length).fill(''));
+      return createBlankTableData();
     }
 
     // 儲存資料到本地 - 使用無提示或自動消失提示
     function saveData() {
       try {
         const data = hot.getData();
-        localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(data));
+        persistTableData(data);
         postDraftToOpener();
         showNotification('資料已儲存');
       } catch (e) {
@@ -947,7 +1429,7 @@
       try {
         const savedData = localStorage.getItem(getScopedStorageKey('tableData'));
         if (savedData) {
-          hot.loadData(JSON.parse(savedData));
+          hot.loadData(parseCurrentTablePayload(JSON.parse(savedData)));
           refreshReport({ silent: true });
           scheduleDraftSave();
           showNotification('資料已載入');
@@ -960,11 +1442,25 @@
       }
     }
 
+    function clearPreviousReportContext() {
+      const examDateInput = document.getElementById('examDate');
+      const previousReportInput = document.getElementById('previousReportInput');
+
+      if (examDateInput) {
+        examDateInput.value = '';
+      }
+      if (previousReportInput) {
+        previousReportInput.value = '';
+      }
+      localStorage.removeItem(getScopedStorageKey('savedDate'));
+    }
+
     // 清除所有資料
     function clearData() {
       if (confirm('確定要清除所有資料嗎？此操作無法復原！')) {
-        hot.loadData(Array.from({ length: DEFAULT_ROW_COUNT }, () => Array(myColumns.length).fill('')));
+        hot.loadData(createBlankTableData());
         localStorage.removeItem(getScopedStorageKey('tableData'));
+        clearPreviousReportContext();
         refreshReport({ silent: true });
         scheduleDraftSave();
         showNotification('所有資料已清除');
@@ -1031,11 +1527,9 @@
     }
 
     function normalizeReportInput(reportText) {
-      const normalized = String(reportText || '').trim();
-      if (!normalized) return '';
-      return normalized.includes('Exam Date')
-        ? `Exam Date${normalized.split('Exam Date').slice(1).join('Exam Date')}`
-        : normalized;
+      return window.previousReportParser?.normalizeReportInput
+        ? window.previousReportParser.normalizeReportInput(reportText)
+        : String(reportText || '').trim();
     }
 
     function normalizeDate(dateString) {
@@ -1101,10 +1595,11 @@
       return {
         lesion: splitRecord.lesion,
         radioactivity: splitRecord.radioactivity,
-        note: normalizeNoteValue(
+        previousImpression: normalizeNoteValue(
+          baseRecord.previousImpression ||
+          baseRecord.priorImpression ||
           baseRecord.note ||
           baseRecord.impression ||
-          baseRecord.previousImpression ||
           baseRecord.comment ||
           ''
         )
@@ -1212,7 +1707,7 @@
           parsed.lesions.map(lesion => ({
             lesion: normalizeLesionValue(lesion),
             radioactivity: '',
-            note: ''
+            previousImpression: ''
           }))
         );
       }
@@ -1240,7 +1735,7 @@
       normalized.records.forEach((record, index) => {
         newData[index][COLUMN_INDEX.RADIOACTIVITIES] = record.radioactivity || '';
         newData[index][COLUMN_INDEX.LESIONS] = record.lesion;
-        newData[index][COLUMN_INDEX.NOTE] = record.note || '';
+        newData[index][COLUMN_INDEX.PREVIOUS_IMPRESSION] = record.previousImpression || '';
         if (!record.radioactivity && record.lesion && !isAppendixLesionValue(record.lesion)) {
           autofillUpdates.push([index, COLUMN_INDEX.RADIOACTIVITIES, DEFAULT_RADIOACTIVITY]);
         }
@@ -1250,210 +1745,24 @@
       if (autofillUpdates.length > 0) {
         hot.setDataAtCell(autofillUpdates, AUTOFILL_DEFAULT_RADIOACTIVITY_SOURCE);
       }
-      localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(hot.getData()));
+      persistTableData(hot.getData());
 
       document.getElementById('examDate').value = normalized.examDate || '';
       saveDate(false);
       scheduleDraftSave();
+      const autoShowKeys = ['changes'];
+      if (normalized.records.some(record => String(record.previousImpression || '').trim() !== '')) {
+        autoShowKeys.push('previousImpression');
+      }
+      autoShowColumns(autoShowKeys);
       return normalized;
     }
 
-    function extractExamDate(reportText) {
-      const examDateMatch = reportText.match(/Exam Date\s*[:：]?\s*(\d{4}[\/-]\d{1,2}[\/-]\d{1,2})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/i);
-      return examDateMatch ? normalizeDate(examDateMatch[1]) : '';
-    }
-
-    function extractFindingsSection(reportText) {
-      const findingsMatch = reportText.match(/\[Findings\]([\s\S]*?)(?=\[Impression\]|\[Conclusion\]|$)/i);
-      if (findingsMatch) {
-        return findingsMatch[1].trim();
-      }
-
-      const labeledMatch = reportText.match(/Findings?\s*[:：]([\s\S]*?)(?=Impressions?\s*[:：]|Conclusion\s*[:：]|$)/i);
-      if (labeledMatch) {
-        return labeledMatch[1].trim();
-      }
-
-      const sentences = reportText
-        .split(/\n+/)
-        .map(line => line.trim())
-        .filter(line => /(radioactivity|bone scan|Tc-99m|lesion|rib|vertebra|skull)/i.test(line));
-
-      return sentences.join(' ');
-    }
-
-    function expandGroupedRibPhrase(prefix, groupText, suffix) {
-      const cleanedGroupText = groupText.replace(/\band\b/gi, ',');
-      return cleanedGroupText
-        .split(',')
-        .map(part => part.trim())
-        .filter(Boolean)
-        .map(part => `${prefix} ${part} ${suffix}`.replace(/\s+/g, ' ').trim());
-    }
-
-    function extractLesionsFromFindings(findingsText) {
-      let working = ` ${findingsText.replace(/\s+/g, ' ').trim()} `;
-      const lesions = [];
-
-      const structuredChunkPattern = /((?:anterior|posterior|lateral|medial|anterolateral|posterolateral|costovertebral|costochondral|costosternal)\s+aspects?\s+of\s+(?:the\s+)?)?(?:(?:left|right|bilateral)\s+\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?(?:\s*,\s*\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)*(?:\s+and\s+(?:(?:left|right|bilateral)\s+)?\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)*)\s*(rib|ribs|costovertebral joint|costovertebral joints|costovertebral junction|costovertebral junctions|costochondral junction|costochondral junctions|costosternal joint|costosternal joints|costosternal junction|costosternal junctions)/gi;
-      working = working.replace(structuredChunkPattern, match => {
-        const aspectMatch = match.match(/^((?:anterior|posterior|lateral|medial|anterolateral|posterolateral|costovertebral|costochondral|costosternal)\s+aspects?\s+of\s+(?:the\s+)?)?/i);
-        const structureMatch = match.match(/(rib|ribs|costovertebral joint|costovertebral joints|costovertebral junction|costovertebral junctions|costochondral junction|costochondral junctions|costosternal joint|costosternal joints|costosternal junction|costosternal junctions)\s*$/i);
-        const aspect = aspectMatch?.[1] || '';
-        const structure = structureMatch?.[1] || '';
-        const singularStructure = structure.replace(/s\b/i, '');
-        const pairPattern = /(left|right|bilateral)\s+((?:\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)(?:\s*,\s*\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)*(?:\s+and\s+\d+(?:st|nd|rd|th)?(?:-\d+(?:st|nd|rd|th)?)?)*)/gi;
-        let pairMatch;
-
-        while ((pairMatch = pairPattern.exec(match)) !== null) {
-          const prefix = `${aspect}${pairMatch[1]}`.replace(/\s+/g, ' ').trim();
-          expandGroupedRibPhrase(prefix, pairMatch[2], singularStructure).forEach(item => lesions.push(item));
-        }
-        return ' ';
-      });
-
-      const vertebraPattern = /\b([CTLS]\d+(?:-[CTLS]?\d+)?)\b/g;
-      working = working.replace(vertebraPattern, match => {
-        lesions.push(match.toUpperCase());
-        return ' ';
-      });
-
-      const simplePatterns = [
-        /\bC-T-L-S spine\b/gi,
-        /\bC-T-L spine\b/gi,
-        /\bT-L-S spine\b/gi,
-        /\bT-L spine\b/gi,
-        /\bL-S spine\b/gi,
-        /\b(?:upper|middle|lower)\s+C-spine\b/gi,
-        /\b(?:upper|middle|lower)\s+cervical spine\b/gi,
-        /\bC-spine\b/gi,
-        /\bcervical spine\b/gi,
-        /\b(?:upper|middle)\s+T-spine\b/gi,
-        /\b(?:upper|middle)\s+thoracic spine\b/gi,
-        /\bT-spine\b/gi,
-        /\bthoracic spine\b/gi,
-        /\blower L-spine\b/gi,
-        /\blower lumbar spine\b/gi,
-        /\bL-spine\b/gi,
-        /\blumbar spine\b/gi,
-        /\bL spine\b/gi,
-        /\bskull\b/gi,
-        /\bbilateral maxillae\b/gi,
-        /\bbilateral maxillary areas\b/gi,
-        /\bleft maxilla\b/gi,
-        /\bright maxilla\b/gi,
-        /\bmaxilla\b/gi,
-        /\b(?:left|right|middle) part of (?:the )?mandible\b/gi,
-        /\bleft mandible\b/gi,
-        /\bright mandible\b/gi,
-        /\bmandible\b/gi,
-        /\bleft mastoid region\b/gi,
-        /\bright mastoid region\b/gi,
-        /\bparanasal region\b/gi,
-        /\bleft sacroiliac joint\b/gi,
-        /\bright sacroiliac joint\b/gi,
-        /\bbilateral sacroiliac joints\b/gi,
-        /\b(?:left|right|bilateral)\s+SI\s+junctions?\b/gi,
-        /\b(?:left|right|bilateral)\s+SI\s+joints?\b/gi,
-        /\bsternum\b/gi,
-        /\b(?:left|right|bilateral)\s+sterno-clavicular\s+junctions?\b/gi,
-        /\b(?:left|right|bilateral)\s+sternoclavicular\s+junctions?\b/gi,
-        /\b(?:left|right|bilateral)\s+sternoclavicular\s+joints?\b/gi,
-        /\bpelvis\b/gi,
-        /\bbilateral pelvic bones\b/gi,
-        /\bleft pelvic bones\b/gi,
-        /\bright pelvic bones\b/gi,
-        /\bbilateral ilia\b/gi,
-        /\bleft ilium\b/gi,
-        /\bright ilium\b/gi,
-        /\b(?:left|right|bilateral)\s+iliac bones?\b/gi,
-        /\bbilateral ischia\b/gi,
-        /\bleft ischium\b/gi,
-        /\bright ischium\b/gi,
-        /\bbilateral pubic bones\b/gi,
-        /\bleft pubic bone\b/gi,
-        /\bright pubic bone\b/gi,
-        /\bbilateral pubes\b/gi,
-        /\bleft pubis\b/gi,
-        /\bright pubis\b/gi,
-        /\bbilateral acetabulums\b/gi,
-        /\bbilateral acetabula\b/gi,
-        /\bleft acetabulum\b/gi,
-        /\bright acetabulum\b/gi,
-        /\bleft femur\b/gi,
-        /\bright femur\b/gi,
-        /\bbilateral femurs\b/gi,
-        /\bbilateral femora\b/gi,
-        /\bleft proximal femur\b/gi,
-        /\bright proximal femur\b/gi,
-        /\bbilateral proximal femurs\b/gi,
-        /\bbilateral proximal femora\b/gi,
-        /\bleft humerus\b/gi,
-        /\bright humerus\b/gi,
-        /\bbilateral humeri\b/gi,
-        /\bleft scapula\b/gi,
-        /\bright scapula\b/gi,
-        /\bbilateral scapulae\b/gi,
-        /\bleft clavicle\b/gi,
-        /\bright clavicle\b/gi,
-        /\bbilateral clavicles\b/gi,
-        /\bleft tibia\b/gi,
-        /\bright tibia\b/gi,
-        /\bleft fibula\b/gi,
-        /\bright fibula\b/gi,
-        /\bleft radius\b/gi,
-        /\bright radius\b/gi,
-        /\bleft ulna\b/gi,
-        /\bright ulna\b/gi
-      ];
-
-      simplePatterns.forEach(pattern => {
-        working = working.replace(pattern, match => {
-          lesions.push(match.toLowerCase() === 'skull' ? 'skull' : normalizeLesionValue(match));
-          return ' ';
-        });
-      });
-
-      return lesions;
-    }
-
-    function sortLesionsHeadToToe(lesions) {
-      const rankRules = [
-        { pattern: /skull/i, rank: 10 },
-        { pattern: /^[c]\d/i, rank: 20 },
-        { pattern: /^[t]\d/i, rank: 30 },
-        { pattern: /rib|sternum|cost/i, rank: 40 },
-        { pattern: /^[l]\d/i, rank: 50 },
-        { pattern: /sacroiliac|pelvis|sacrum/i, rank: 60 },
-        { pattern: /femur/i, rank: 70 },
-        { pattern: /humerus/i, rank: 80 }
-      ];
-
-      return lesions
-        .map((lesion, index) => ({ lesion, index }))
-        .sort((a, b) => {
-          const rankA = rankRules.find(rule => rule.pattern.test(a.lesion))?.rank ?? 999;
-          const rankB = rankRules.find(rule => rule.pattern.test(b.lesion))?.rank ?? 999;
-          if (rankA !== rankB) return rankA - rankB;
-          return a.index - b.index;
-        })
-        .map(item => item.lesion);
-    }
-
     function parsePreviousReportRuleBased(reportText) {
-      const normalizedReport = normalizeReportInput(reportText);
-      const findingsText = extractFindingsSection(normalizedReport);
-      const lesions = extractLesionsFromFindings(findingsText);
-      const uniqueLesions = Array.from(new Set(lesions.map(normalizeLesionValue).filter(Boolean)));
-
-      return {
-        records: sortLesionsHeadToToe(uniqueLesions).map(lesion => ({
-          lesion,
-          radioactivity: '',
-          note: ''
-        })),
-        examDate: extractExamDate(normalizedReport)
-      };
+      if (!window.previousReportParser?.parseRuleBased) {
+        throw new Error('Rule-based parser is unavailable');
+      }
+      return window.previousReportParser.parseRuleBased(reportText);
     }
 
     async function callOpenAIForPreviousReport(reportText, apiKey) {
@@ -1471,9 +1780,9 @@
           messages: [
             {
               role: 'system',
-              content: `Extract structured data from a prior bone scan report and return a JSON object only, with this exact shape: {"examDate":"YYYY-MM-DD or empty string","records":[{"lesion":"string","radioactivity":"string","note":"string"}]}. Each record must represent one lesion. "lesion" is required. "radioactivity" should be one exact string from this allowed list when highly confident, otherwise "":
+              content: `Extract structured data from a prior bone scan report and return a JSON object only, with this exact shape: {"examDate":"YYYY-MM-DD or empty string","records":[{"lesion":"string","radioactivity":"string","previousImpression":"string"}]}. Each record must represent one lesion. "lesion" is required. "radioactivity" should be one exact string from this allowed list when highly confident, otherwise "":
 ${JSON.stringify(window.radioactivitiesCandidates || [])}
-"note" should be a concise prior impression/comment summary specifically relevant to that lesion; if not clear, use "". Prefer concise canonical app wording when obvious, such as "C-spine" rather than "cervical spine", "left SI joint" rather than "left SI junction", "right sternoclavicular joint" rather than "right sterno-clavicular junction", and "bilateral maxilla" rather than "bilateral maxillae". Still extract meaningful lesions even if the wording is not in the app vocabulary. Keep records organized roughly from head to toe.`
+"previousImpression" should be a concise prior impression/comment summary specifically relevant to that lesion; if not clear, use "". Prefer concise canonical app wording when obvious, such as "C-spine" rather than "cervical spine", "left SI joint" rather than "left SI junction", "right sternoclavicular joint" rather than "right sterno-clavicular junction", and "bilateral maxilla" rather than "bilateral maxillae". Still extract meaningful lesions even if the wording is not in the app vocabulary. Keep records organized roughly from head to toe.`
             },
             {
               role: 'user',
@@ -1632,6 +1941,7 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
     function getGeneratorState() {
       return {
         tableData: hot ? hot.getData() : [],
+        tableDataSchemaVersion: TABLE_DATA_SCHEMA_VERSION,
         examDate: document.getElementById('examDate')?.value?.trim() || '',
         updatedAt: new Date().toISOString()
       };
@@ -1679,6 +1989,10 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       manualRowMove: true,
       colWidths: index => calculateColWidth(index),
       stretchH: 'none',
+      hiddenColumns: {
+        columns: getActiveHiddenColumnIndexes(),
+        indicators: true
+      },
       licenseKey: 'non-commercial-and-evaluation',
       afterGetColHeader: function(column, TH) {
         const sortable = isSortableColumn(column);
@@ -1741,7 +2055,7 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
           // 只有用戶編輯時才自動儲存，但不顯示通知
           try {
             const data = hot.getData();
-            localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(data));
+            persistTableData(data);
             scheduleRefreshReport();
             scheduleDraftSave();
             // 編輯時不顯示通知，避免干擾
@@ -1754,12 +2068,12 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       }
     });
 
+    applyMainPaneRatio();
+
     // 視窗大小改變時，更新欄寬並清除緩存
     window.addEventListener('resize', () => {
-      hot.updateSettings({
-        colWidths: index => calculateColWidth(index)
-      });
-      hot.render();
+      applyMainPaneRatio();
+      scheduleHotLayoutRefresh();
       clearCaches(); // 清除搜索和正則表達式緩存
     });
 
@@ -1793,16 +2107,16 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
     // 載入測試資料
     function loadTestData() {
       const testData = [
-        ['radioactivities', 'lesions', 'changes', 'impressions', 'note', 's', 'i', 'x', 'y'],
-        ['heterogeneously increased radioactivity in {}', 'L5', '', 'Possible bone metastasis in {lesion}.', '', '5', '48', '', ''],
-        ['heterogeneously increased radioactivity in {}', 'L4', '', 'Possible bone metastasis in {lesion}.', '', '', '', '', ''],
-        ['heterogeneously increased radioactivity in {}', 'L3', '', 'Possible bone metastasis in {lesion}.', '', '', '', '', ''],
-        ['focal increased radioactivity in {}', 'left 5th rib', 'newly noted', 'probable bone metastasis', '', '2', '', '', ''],
-        ['increased radioactivity in {}', 'right 8th-9th ribs', 'more intense', 'progressive bone metastases', '', '', '21', '', '']
+        ['radioactivities', 'lesions', 'changes', 'impressions', 'previous impression', 'note', 's', 'i', 'x', 'y'],
+        ['heterogeneously increased radioactivity in {}', 'L5', '', 'Possible bone metastasis in {lesion}.', '', '', '5', '48', '', ''],
+        ['heterogeneously increased radioactivity in {}', 'L4', '', 'Possible bone metastasis in {lesion}.', '', '', '', '', '', ''],
+        ['heterogeneously increased radioactivity in {}', 'L3', '', 'Possible bone metastasis in {lesion}.', '', '', '', '', '', ''],
+        ['focal increased radioactivity in {}', 'left 5th rib', 'newly noted', 'probable bone metastasis', '', '', '2', '', '', ''],
+        ['increased radioactivity in {}', 'right 8th-9th ribs', 'more intense', 'progressive bone metastases', '', '', '', '21', '', '']
       ];
       
       hot.loadData(testData.slice(1)); // 跳過標題行
-      localStorage.setItem(getScopedStorageKey('tableData'), JSON.stringify(testData.slice(1)));
+      persistTableData(testData.slice(1));
       refreshReport({ silent: true });
       scheduleDraftSave();
       showNotification('測試資料已載入');
@@ -1945,6 +2259,7 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
     }
 
     // 初始化時載入儲存的日期
+    renderColumnMenuOptions();
     loadSavedDate();
     loadSavedApiKey();
     setParserMode(PARSER_MODE.API);
@@ -1958,6 +2273,20 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
     document.getElementById('loadBtn').addEventListener('click', loadData);
     document.getElementById('exportBtn').addEventListener('click', exportToCsv);
     document.getElementById('clearBtn').addEventListener('click', clearData);
+    document.getElementById('columnsMenuBtn').addEventListener('click', event => {
+      event.stopPropagation();
+      toggleColumnMenu();
+    });
+    document.getElementById('columnsMenu').addEventListener('click', event => {
+      event.stopPropagation();
+    });
+    document.getElementById('showAllColumnsBtn').addEventListener('click', showAllColumns);
+    document.getElementById('resetColumnsBtn').addEventListener('click', resetColumnVisibility);
+    document.getElementById('paneResizer').addEventListener('pointerdown', startPaneResize);
+    document.getElementById('paneResizer').addEventListener('keydown', handlePaneResizerKeydown);
+    document.addEventListener('pointermove', movePaneResize);
+    document.addEventListener('pointerup', finishPaneResize);
+    document.addEventListener('pointercancel', finishPaneResize);
     document.getElementById('loadTestDataBtn').addEventListener('click', loadTestData);
     document.getElementById('generateReportBtn').addEventListener('click', generateReport);
     document.getElementById('sendReportDataBtn').addEventListener('click', sendReportData);
@@ -1972,6 +2301,17 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       scheduleRefreshReport();
     });
     document.getElementById('openaiApiKey').addEventListener('change', () => saveApiKey(false));
+    document.addEventListener('click', event => {
+      const wrapper = document.getElementById('columnMenuWrapper');
+      if (wrapper && !wrapper.contains(event.target)) {
+        toggleColumnMenu(false);
+      }
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        toggleColumnMenu(false);
+      }
+    });
   </script>
 </body>
 </html>

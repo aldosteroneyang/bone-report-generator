@@ -18,6 +18,86 @@
     'lateral',
     'medial'
   ];
+  const EXTRACTION_ALIASES = [
+    'cervical spine',
+    'upper cervical spine',
+    'middle cervical spine',
+    'lower cervical spine',
+    'thoracic spine',
+    'upper thoracic spine',
+    'middle thoracic spine',
+    'lumbar spine',
+    'lower lumbar spine',
+    'L spine',
+    'bilateral maxillae',
+    'maxillae',
+    'bilateral maxillary area',
+    'bilateral maxillary areas',
+    'left part of mandible',
+    'right part of mandible',
+    'middle part of mandible',
+    'left part of the mandible',
+    'right part of the mandible',
+    'middle part of the mandible',
+    'left side of mandible',
+    'right side of mandible',
+    'left mastoid region',
+    'right mastoid region',
+    'paranasal region',
+    'paranasal regions',
+    'bilateral paranasal regions',
+    'left SI junction',
+    'right SI junction',
+    'bilateral SI junction',
+    'bilateral SI junctions',
+    'left sacroiliac joint',
+    'right sacroiliac joint',
+    'bilateral sacroiliac joint',
+    'bilateral sacroiliac joints',
+    'left sacroiliac junction',
+    'right sacroiliac junction',
+    'bilateral sacroiliac junction',
+    'bilateral sacroiliac junctions',
+    'left sterno-clavicular junction',
+    'right sterno-clavicular junction',
+    'bilateral sterno-clavicular junction',
+    'bilateral sterno-clavicular junctions',
+    'left sterno-clavicular joint',
+    'right sterno-clavicular joint',
+    'bilateral sterno-clavicular joint',
+    'bilateral sterno-clavicular joints',
+    'left sternoclavicular junction',
+    'right sternoclavicular junction',
+    'bilateral sternoclavicular junction',
+    'bilateral sternoclavicular junctions',
+    'pelvis',
+    'bilateral pelvis',
+    'pelvic bones',
+    'left pelvis',
+    'right pelvis',
+    'left iliac bone',
+    'right iliac bone',
+    'bilateral iliac bones',
+    'ilia',
+    'ischia',
+    'left pubic bone',
+    'right pubic bone',
+    'bilateral pubic bones',
+    'pubic bones',
+    'pubes',
+    'acetabulums',
+    'acetabula',
+    'bilateral acetabulums',
+    'left acetabula',
+    'right acetabula',
+    'femurs',
+    'femora',
+    'bilateral femurs',
+    'bilateral proximal femurs',
+    'humeri',
+    'scapulae',
+    'clavicles'
+  ];
 
   function getCandidates() {
     return Array.isArray(global.lesionsCandidates) ? global.lesionsCandidates : [];
@@ -347,9 +427,14 @@
     }));
   }
 
+  function getExtractionAliases() {
+    return uniqueValues(EXTRACTION_ALIASES);
+  }
+
   global.lesionCanonicalizer = {
     canonicalizeLesion,
     canonicalizeRecord,
+    getExtractionAliases,
     getCandidateRank,
     normalizeKey
   };
