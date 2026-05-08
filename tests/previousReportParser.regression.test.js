@@ -68,6 +68,13 @@ Tc-99m MDP whole body bone scan shows increased radioactivity in the right hip, 
 
 {
   assert.deepEqual(
+    lesionNames('[Findings]\nIncreased radioactivity in medial aspect of right 7th rib.'),
+    ['right 7th rib']
+  );
+}
+
+{
+  assert.deepEqual(
     lesionNames('[Findings]\nIncreased radioactivity in bilateral 3rd costochondral junctions and T7-L2.'),
     [
       'T7',

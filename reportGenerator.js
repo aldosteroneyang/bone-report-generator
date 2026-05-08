@@ -1335,6 +1335,27 @@ function normalizeGeneratedText(text) {
     .trim();
 }
 
+function normalizeSinusitisImpressionSites(text) {
+  return `${text || ''}`
+    .replace(/\bbilateral maxilla\b/gi, 'bilateral maxillary sinuses')
+    .replace(/\bleft maxilla\b/gi, 'left maxillary sinus')
+    .replace(/\bright maxilla\b/gi, 'right maxillary sinus')
+    .replace(/\bmaxilla\b/gi, 'maxillary sinus')
+    .replace(/\bbilateral paranasal areas\b/gi, 'bilateral paranasal sinuses')
+    .replace(/\bright paranasal area\b/gi, 'right paranasal sinus')
+    .replace(/\bleft paranasal area\b/gi, 'left paranasal sinus')
+    .replace(/\bparanasal area\b/gi, 'paranasal sinus')
+    .replace(/\bethmoid bone\b/gi, 'ethmoid sinus');
+}
+
+function normalizeRecommendationSentenceBoundaries(text) {
+  return normalizeGeneratedText(
+    `${text || ''}`.replace(/,\s+((?:further evaluation|traumatic history review|follow-up bone scan|imaging correlation)[^.]*\bis recommended[^.]*)\./gi, (_, clause) =>
+      `. ${clause.charAt(0).toUpperCase()}${clause.slice(1)}.`
+    )
+  );
+}
+
 const NEGATIVE_IMPRESSION_TEXT = 'No definite evidence of bone metastasis.';
 
 function stripImpressionNumber(line) {
@@ -2718,6 +2739,7 @@ function getReport(tableData, examDate) {
         : formattedImpression
     }
 
+    formattedImpression = normalizeRecommendationSentenceBoundaries(formattedImpression);
     impressionsMap.set(impression, formattedImpression);
   });
   let sortedImpressions = Array.from(impressionsMap.entries()).sort((a, b) => {
@@ -2731,17 +2753,7 @@ function getReport(tableData, examDate) {
   });
 
   sortedImpressions = sortedImpressions.map(x => x[1].includes('sinusitis') 
-  ? [x[0],x[1]
-  .replace('bilateral maxilla', 'bilateral maxillary sinuses')
-  .replace('left maxilla', 'left maxillary sinus')
-  .replace('right maxilla', 'right maxillary sinus')
-  .replace('maxilla', 'maxillary sinus')
-  .replace('bilateral paranasal areas', 'bilateral paranasal sinuses')
-  .replace('right paranasal area', 'right paranasal sinus')
-  .replace('left paranasal area', 'left paranasal sinus')
-  .replace('paranasal area', 'paranasal sinus')
-  .replace('ethmoid bone', 'ethmoid sinus')
-  ]
+  ? [x[0], normalizeSinusitisImpressionSites(x[1])]
   : x)
 
   sortedImpressions = sortedImpressions.map(x => x[1].includes('mastoiditis in the ') 

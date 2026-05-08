@@ -10,10 +10,12 @@
   
   <!-- 載入候選資料檔案 (這些檔案需定義全域變數，如 window.radioactivitiesCandidates) -->
   <script src="radioactivities.js"></script>
+  <script src="radioactivityImportNormalizer.js"></script>
   <script src="lesions.js"></script>
   <script src="appendices.js"></script>
   <script src="lesionCanonicalizer.js"></script>
   <script src="previousReportParser.js"></script>
+  <script src="previousReportAspectPreserver.js"></script>
   <script src="changes.js"></script>
   <script src="impressions.js"></script>
   
@@ -872,6 +874,7 @@
     const columnKeys = myColumns.map((col, index) => col.key || baseColHeaders[index] || String(index));
     const TABLE_DATA_SCHEMA_VERSION = 2;
     const COLUMN_VISIBILITY_STORAGE_KEY = 'boneReportGenerator:columnVisibility';
+    const COLUMN_WIDTHS_STORAGE_KEY = 'boneReportGenerator:columnWidths';
     const MAIN_PANE_RATIO_STORAGE_KEY = 'boneReportGenerator:mainPaneRatio';
     const INCOMPATIBLE_TABLE_DATA_MESSAGE = '舊版暫存資料已略過，請重新解析或重新載入';
     const DEFAULT_HIDDEN_COLUMN_KEYS = new Set(['previousImpression']);
@@ -880,6 +883,7 @@
     const MAX_MAIN_PANE_RATIO = 0.75;
     const STACKED_LAYOUT_MEDIA_QUERY = '(max-width: 1100px)';
     let storedHiddenColumnKeys = loadStoredHiddenColumnKeys();
+    let storedColumnWidths = loadStoredColumnWidths();
     let currentMainPaneRatio = loadMainPaneRatio();
     let paneResizeActive = false;
     let paneLayoutFrame = null;
@@ -901,6 +905,12 @@
     const DEFAULT_RADIOACTIVITY = 'increased radioactivity in {}';
     const AUTOFILL_DEFAULT_RADIOACTIVITY_SOURCE = 'autofillDefaultRadioactivity';
     const APPENDIX_RADIOACTIVITY_CLEAR_SOURCE = 'appendixRadioactivityClear';
+    const radioactivityImportNormalizer = window.radioactivityImportNormalizer || null;
+    const previousReportRadioactivityCandidates = radioactivityImportNormalizer?.getAllowedRadioactivityCandidates?.() || [
+      DEFAULT_RADIOACTIVITY,
+      'faint spot in {}',
+      'cold area in {}'
+    ];
     const radioactivityCandidateLookup = new Map(
       (window.radioactivitiesCandidates || []).map(candidate => [
         String(candidate || '').replace(/\s+/g, ' ').trim().toLowerCase(),
@@ -975,6 +985,93 @@
       } catch (error) {
         console.warn('欄位顯示設定儲存失敗:', error);
       }
+    }
+
+    function sanitizeColumnWidths(columnWidths) {
+      if (!columnWidths || typeof columnWidths !== 'object' || Array.isArray(columnWidths)) {
+        return {};
+      }
+
+      return columnKeys.reduce((sanitized, key) => {
+        const width = Number(columnWidths[key]);
+        if (Number.isFinite(width) && width > 0) {
+          sanitized[key] = Math.round(width);
+        }
+        return sanitized;
+      }, {});
+    }
+
+    function loadStoredColumnWidths() {
+      try {
+        const saved = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
+        if (!saved) {
+          return {};
+        }
+
+        const parsed = JSON.parse(saved);
+        return sanitizeColumnWidths(parsed?.columnWidths);
+      } catch (error) {
+        console.warn('欄寬設定載入失敗:', error);
+        return {};
+      }
+    }
+
+    function persistColumnWidths() {
+      try {
+        localStorage.setItem(COLUMN_WIDTHS_STORAGE_KEY, JSON.stringify({
+          columnWidths: { ...storedColumnWidths }
+        }));
+      } catch (error) {
+        console.warn('欄寬設定儲存失敗:', error);
+      }
+    }
+
+    function clearStoredColumnWidths() {
+      storedColumnWidths = {};
+      try {
+        localStorage.removeItem(COLUMN_WIDTHS_STORAGE_KEY);
+      } catch (error) {
+        console.warn('欄寬設定清除失敗:', error);
+      }
+    }
+
+    function getStoredColumnWidth(index) {
+      const columnKey = columnIndexToKey(index);
+      const width = Number(storedColumnWidths[columnKey]);
+      return columnKey && Number.isFinite(width) && width > 0 ? width : null;
+    }
+
+    function setStoredColumnWidth(index, width) {
+      const columnKey = columnIndexToKey(index);
+      const numericWidth = Number(width);
+      if (!columnKey || !Number.isFinite(numericWidth) || numericWidth <= 0) {
+        return;
+      }
+
+      storedColumnWidths = {
+        ...storedColumnWidths,
+        [columnKey]: Math.round(Math.max(minColumnWidths[index] || 20, numericWidth))
+      };
+      persistColumnWidths();
+    }
+
+    function getManualColumnResizePlugin() {
+      if (typeof hot === 'undefined' || !hot) return null;
+      return hot.getPlugin?.('manualColumnResize') || hot.getPlugin?.('ManualColumnResize') || null;
+    }
+
+    function syncManualColumnResizePlugin() {
+      const manualColumnResizePlugin = getManualColumnResizePlugin();
+      if (!manualColumnResizePlugin) return;
+
+      columnKeys.forEach((key, index) => {
+        const storedWidth = getStoredColumnWidth(index);
+        if (storedWidth === null) {
+          manualColumnResizePlugin.clearManualSize?.(index);
+        } else {
+          manualColumnResizePlugin.setManualSize?.(index, storedWidth);
+        }
+      });
     }
 
     function getActiveHiddenColumnKeys() {
@@ -1058,6 +1155,7 @@
       if (typeof hot !== 'undefined' && hot) {
         const hiddenColumnKeys = getActiveHiddenColumnKeys();
         const hiddenColumnIndexes = columnKeysToIndexes(hiddenColumnKeys);
+        syncManualColumnResizePlugin();
         hot.updateSettings({
           hiddenColumns: {
             columns: hiddenColumnIndexes,
@@ -1073,6 +1171,12 @@
       if (notify) {
         showNotification(notify);
       }
+    }
+
+    function reloadStoredColumnVisibility() {
+      storedHiddenColumnKeys = loadStoredHiddenColumnKeys();
+      transientVisibleColumnKeys.clear();
+      applyColumnVisibility();
     }
 
     function setColumnHidden(key, hidden, { persist = true } = {}) {
@@ -1097,7 +1201,8 @@
     function resetColumnVisibility() {
       storedHiddenColumnKeys = new Set(DEFAULT_HIDDEN_COLUMN_KEYS);
       transientVisibleColumnKeys.clear();
-      applyColumnVisibility({ persist: true, notify: '欄位顯示已重設' });
+      clearStoredColumnWidths();
+      applyColumnVisibility({ persist: true, notify: '欄位顯示與寬度已重設' });
     }
 
     function autoShowColumns(keys) {
@@ -1140,6 +1245,7 @@
       paneLayoutFrame = window.requestAnimationFrame(() => {
         paneLayoutFrame = null;
         if (typeof hot === 'undefined' || !hot) return;
+        syncManualColumnResizePlugin();
         hot.updateSettings({
           colWidths: index => calculateColWidth(index)
         });
@@ -1375,6 +1481,11 @@
 
     // 動態計算欄寬：依據容器寬度與各欄比例
     function calculateColWidth(index) {
+      const storedWidth = getStoredColumnWidth(index);
+      if (storedWidth !== null) {
+        return Math.max(minColumnWidths[index] || 80, storedWidth);
+      }
+
       const totalWidth = Math.max(container.clientWidth, 920);
       const totalProportion = myColumns.reduce((sum, col) => sum + (col.proportion || 1), 0);
       const unit = totalWidth / totalProportion;
@@ -1556,6 +1667,11 @@
     }
 
     function resolveExactRadioactivityCandidate(value) {
+      const normalizedImportRadioactivity = radioactivityImportNormalizer?.normalizeImportedRadioactivity?.(value) || '';
+      if (normalizedImportRadioactivity) {
+        return normalizedImportRadioactivity;
+      }
+
       const normalizedValue = String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
       return radioactivityCandidateLookup.get(normalizedValue) || '';
     }
@@ -1568,16 +1684,27 @@
         return { lesion, radioactivity };
       }
 
+      const normalizedImportRecord = radioactivityImportNormalizer?.splitEmbeddedRadioactivity?.(
+        { lesion, radioactivity: '' },
+        normalizeLesionValue
+      );
+      if (normalizedImportRecord?.radioactivity) {
+        return {
+          lesion: normalizeLesionValue(normalizedImportRecord.lesion),
+          radioactivity: normalizedImportRecord.radioactivity
+        };
+      }
+
       const normalizedLesion = lesion.toLowerCase();
       for (const template of radioactivityTemplatePrefixes) {
         if (!template.normalizedPrefix) continue;
         if (normalizedLesion === template.normalizedPrefix) {
-          return { lesion: '', radioactivity: template.candidate };
+          return { lesion: '', radioactivity: resolveExactRadioactivityCandidate(template.candidate) || template.candidate };
         }
         if (normalizedLesion.startsWith(`${template.normalizedPrefix} `)) {
           return {
             lesion: normalizeLesionValue(lesion.slice(template.prefix.length).trim()),
-            radioactivity: template.candidate
+            radioactivity: resolveExactRadioactivityCandidate(template.candidate) || template.candidate
           };
         }
       }
@@ -1765,6 +1892,23 @@
       return window.previousReportParser.parseRuleBased(reportText);
     }
 
+    function preserveApiParsedReportAspects(parsedResult, reportText) {
+      const aspectPreserver = window.previousReportAspectPreserver;
+      if (!aspectPreserver?.preserveAspectDetails) {
+        return parsedResult;
+      }
+
+      try {
+        const ruleBasedResult = validateParsedPreviousReport(parsePreviousReportRuleBased(reportText));
+        return aspectPreserver.preserveAspectDetails(parsedResult, ruleBasedResult, {
+          lesionCandidates: window.lesionsCandidates || []
+        });
+      } catch (error) {
+        console.warn('Rule-based aspect preservation skipped:', error);
+        return parsedResult;
+      }
+    }
+
     async function callOpenAIForPreviousReport(reportText, apiKey) {
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -1781,7 +1925,9 @@
             {
               role: 'system',
               content: `Extract structured data from a prior bone scan report and return a JSON object only, with this exact shape: {"examDate":"YYYY-MM-DD or empty string","records":[{"lesion":"string","radioactivity":"string","previousImpression":"string"}]}. Each record must represent one lesion. "lesion" is required. "radioactivity" should be one exact string from this allowed list when highly confident, otherwise "":
-${JSON.stringify(window.radioactivitiesCandidates || [])}
+${JSON.stringify(previousReportRadioactivityCandidates)}
+For "radioactivity", normalize wording into these three import categories. Use "increased radioactivity in {}" for increased, mildly increased, markedly increased, focally increased, heterogeneously increased, or band-like uptake. Use "faint spot in {}" for faint spot, tiny spot, or slightly increased radioactivity. Use "cold area in {}" for cold area or decreased radioactivity.
+Preserve original anatomic aspect details in "lesion" whenever they are present and clinically meaningful, especially rib locations such as "lateral aspect of right 5th rib" or "anterior aspect of left 8th rib"; do not simplify them to "right 5th rib" or "left 8th rib".
 "previousImpression" should be a concise prior impression/comment summary specifically relevant to that lesion; if not clear, use "". Prefer concise canonical app wording when obvious, such as "C-spine" rather than "cervical spine", "left SI joint" rather than "left SI junction", "right sternoclavicular joint" rather than "right sterno-clavicular junction", and "bilateral maxilla" rather than "bilateral maxillae". Still extract meaningful lesions even if the wording is not in the app vocabulary. Keep records organized roughly from head to toe.`
             },
             {
@@ -1802,7 +1948,7 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
         throw new Error('OpenAI API 未回傳可解析內容');
       }
 
-      return validateParsedPreviousReport(JSON.parse(content));
+      return preserveApiParsedReportAspects(validateParsedPreviousReport(JSON.parse(content)), reportText);
     }
 
     async function loadPreviousReport() {
@@ -2016,6 +2162,9 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
         }
         applyCandidateOrderSort(coords.col);
       },
+      afterColumnResize: function(newSize, column) {
+        setStoredColumnWidth(column, newSize);
+      },
       // 自動儲存功能 - 當編輯完成時觸發
       afterChange: function(changes, source) {
         if (changes &&
@@ -2075,6 +2224,18 @@ ${JSON.stringify(window.radioactivitiesCandidates || [])}
       applyMainPaneRatio();
       scheduleHotLayoutRefresh();
       clearCaches(); // 清除搜索和正則表達式緩存
+    });
+
+    window.addEventListener('storage', event => {
+      if (event.key === COLUMN_VISIBILITY_STORAGE_KEY) {
+        reloadStoredColumnVisibility();
+        return;
+      }
+
+      if (event.key === COLUMN_WIDTHS_STORAGE_KEY) {
+        storedColumnWidths = loadStoredColumnWidths();
+        scheduleHotLayoutRefresh();
+      }
     });
 
     // 日期相關函數

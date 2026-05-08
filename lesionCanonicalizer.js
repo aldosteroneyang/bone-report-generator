@@ -355,10 +355,17 @@
 
   function buildRibCandidate(aspect, side, number) {
     const prefix = aspect ? `${aspect} aspect of ` : '';
-    if (side === 'bilateral') {
-      return `${prefix}bilateral ${ordinal(number)} ribs`;
+    const baseCandidate = side === 'bilateral'
+      ? `bilateral ${ordinal(number)} ribs`
+      : `${side} ${ordinal(number)} rib`;
+    const candidate = `${prefix}${baseCandidate}`;
+    if (aspect && !exactCandidate(candidate)) {
+      return baseCandidate;
     }
-    return `${prefix}${side} ${ordinal(number)} rib`;
+    if (side === 'bilateral') {
+      return candidate;
+    }
+    return candidate;
   }
 
   function buildCostalCandidate(kind, side, number) {

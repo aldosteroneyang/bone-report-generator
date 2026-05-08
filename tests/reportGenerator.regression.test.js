@@ -39,6 +39,38 @@ function assertNoMalformedComparisonText(report) {
 }
 
 {
+  assert.equal(
+    context.window.impressionsCandidates.filter(candidate =>
+      /,\s+(?:further evaluation|traumatic history review|follow-up bone scan|imaging correlation)[^.]*\bis recommended/i.test(candidate)
+    ).length,
+    0
+  );
+  assert.ok(context.window.impressionsCandidates.includes(
+    'Bone lesion in {}. Follow-up bone scan is recommended.'
+  ));
+  assert.ok(context.window.impressionsCandidates.includes(
+    'Bone lesion in {}. Further evaluation and/or follow-up bone scan is recommended.'
+  ));
+  assert.ok(context.window.impressionsCandidates.includes(
+    'Bone lesion in {}. Traumatic history review and/or follow-up bone scan is recommended.'
+  ));
+  assert.ok(context.window.impressionsCandidates.includes(
+    'Bone lesion in {}. Imaging correlation is recommended.'
+  ));
+}
+
+{
+  const report = reportFor([
+    lesionRow('L3', '', 'Bone lesion in {}, follow-up bone scan is recommended.')
+  ]);
+
+  assert.equal(
+    report.textImpressions,
+    'Bone lesion in L3. Follow-up bone scan is recommended.'
+  );
+}
+
+{
   const report = reportFor([
     ['increased radioactivity in {}', 'L3', '{}, more intense', '', '', '', '', '', ''],
     ['mildly increased radioactivity in {}', 'L4', 'no more abnormally increased radioactivity in {}', '', '', '', '', '', '']
@@ -106,7 +138,7 @@ function assertNoMalformedComparisonText(report) {
     lesionRow(
       'C3',
       '{}, more intense',
-      'Bone lesion in {}, follow-up bone scan is recommended to exclude bone metastasis.'
+      'Bone lesion in {}. Follow-up bone scan is recommended to exclude bone metastasis.'
     ),
     lesionRow(
       'C-T spine',
@@ -125,39 +157,78 @@ function assertNoMalformedComparisonText(report) {
   );
   assert.equal(
     report.textImpressions,
-    '1. Bone lesion in C3, with progression, follow-up bone scan is recommended to exclude bone metastasis.\n2. Suspect traumatic insult in C-T spine (except C3).'
+    '1. Bone lesion in C3, with progression. Follow-up bone scan is recommended to exclude bone metastasis.\n2. Suspect traumatic insult in C-T spine (except C3).'
   );
 }
 
 {
   const report = reportFor([
-    lesionRow('left pubis', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('bilateral pelvic bones', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('left pubis', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('bilateral pelvic bones', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.equal(
     report.textImpressions,
-    'Bone lesions in left pubis, with progression; while with regression in bilateral pelvic bones (except left pubis), imaging correlation is recommended.'
+    'Bone lesions in left pubis, with progression; while with regression in bilateral pelvic bones (except left pubis). Imaging correlation is recommended.'
+  );
+}
+
+{
+  const rightReport = reportFor([
+    lesionRow('right maxilla', '', 'Suspect sinusitis in {}.')
+  ]);
+
+  assert.equal(
+    rightReport.textImpressions,
+    'Suspect sinusitis in right maxillary sinus.'
+  );
+  assert.doesNotMatch(rightReport.textImpressions, /sinusry sinus/);
+
+  const bilateralReport = reportFor([
+    lesionRow('bilateral maxilla', '', 'Suspect sinusitis in {}.')
+  ]);
+
+  assert.equal(
+    bilateralReport.textImpressions,
+    'Suspect sinusitis in bilateral maxillary sinuses.'
+  );
+
+  const alreadySingularReport = reportFor([
+    lesionRow('right maxillary sinus', '', 'Suspect sinusitis in {}.')
+  ]);
+
+  assert.equal(
+    alreadySingularReport.textImpressions,
+    'Suspect sinusitis in right maxillary sinus.'
+  );
+
+  const alreadyPluralReport = reportFor([
+    lesionRow('bilateral maxillary sinuses', '', 'Suspect sinusitis in {}.')
+  ]);
+
+  assert.equal(
+    alreadyPluralReport.textImpressions,
+    'Suspect sinusitis in bilateral maxillary sinuses.'
   );
 }
 
 {
   const report = reportFor([
-    lesionRow('C-T-L spine', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('L5', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('L2', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('C-T-L spine', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('L5', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('L2', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.equal(
     report.textImpressions,
-    'Bone lesions in C-T-L spine (except L2, L5), with progression; while with regression in L2, L5, imaging correlation is recommended.'
+    'Bone lesions in C-T-L spine (except L2, L5), with progression; while with regression in L2, L5. Imaging correlation is recommended.'
   );
 }
 
 {
   const report = reportFor([
-    lesionRow('left ribs', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('left 3rd rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('left ribs', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('left 3rd rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.equal(
@@ -170,7 +241,7 @@ function assertNoMalformedComparisonText(report) {
   );
   assert.equal(
     report.textImpressions,
-    'Bone lesions in left ribs (except for left 3rd rib), with progression; while with regression in left 3rd rib, imaging correlation is recommended.'
+    'Bone lesions in left ribs (except for left 3rd rib), with progression; while with regression in left 3rd rib. Imaging correlation is recommended.'
   );
 }
 
@@ -179,12 +250,12 @@ function assertNoMalformedComparisonText(report) {
     lesionRow(
       'bilateral ribs',
       '{}, more intense',
-      'Bone lesion in {}, follow-up bone scan is recommended to exclude bone metastasis.'
+      'Bone lesion in {}. Follow-up bone scan is recommended to exclude bone metastasis.'
     ),
     lesionRow(
       'posterior aspect of right 3rd rib',
       '{}, less intense',
-      'Bone lesion in {}, follow-up bone scan is recommended to exclude bone metastasis.'
+      'Bone lesion in {}. Follow-up bone scan is recommended to exclude bone metastasis.'
     )
   ]);
 
@@ -198,7 +269,7 @@ function assertNoMalformedComparisonText(report) {
   );
   assert.equal(
     report.textImpressions,
-    'Bone lesions in bilateral ribs (except for right 3rd rib), with progression; while with regression in right 3rd rib, follow-up bone scan is recommended to exclude bone metastasis.'
+    'Bone lesions in bilateral ribs (except for right 3rd rib), with progression; while with regression in right 3rd rib. Follow-up bone scan is recommended to exclude bone metastasis.'
   );
 }
 
@@ -222,7 +293,7 @@ function assertNoMalformedComparisonText(report) {
     lesionRow(
       'bilateral ribs',
       '{}, more intense',
-      'Bone lesion in {}, follow-up bone scan is recommended to exclude bone metastasis.'
+      'Bone lesion in {}. Follow-up bone scan is recommended to exclude bone metastasis.'
     ),
     lesionRow(
       'posterior aspect of right 3rd rib',
@@ -243,15 +314,15 @@ function assertNoMalformedComparisonText(report) {
   assert.doesNotMatch(report.textFindingsSeparated, /\(except /);
   assert.equal(
     report.textImpressions,
-    '1. Bone lesions in bilateral ribs (except for right 3rd-4th ribs), with progression, follow-up bone scan is recommended to exclude bone metastasis.\n2. Suspect traumatic insults in right 3rd-4th ribs.'
+    '1. Bone lesions in bilateral ribs (except for right 3rd-4th ribs), with progression. Follow-up bone scan is recommended to exclude bone metastasis.\n2. Suspect traumatic insults in right 3rd-4th ribs.'
   );
 }
 
 {
   const report = reportFor([
-    lesionRow('bilateral ribs', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('posterior aspect of right 3rd rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('anterior aspect of right 3rd rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('bilateral ribs', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('posterior aspect of right 3rd rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('anterior aspect of right 3rd rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.match(report.textFindings, /bilateral ribs \(except for right 3rd rib\)/);
@@ -264,8 +335,8 @@ function assertNoMalformedComparisonText(report) {
 
 {
   const report = reportFor([
-    lesionRow('left ribs', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('right 3rd rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('left ribs', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('right 3rd rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.doesNotMatch(report.textFindings, /\(except right 3rd rib\)/);
@@ -274,9 +345,9 @@ function assertNoMalformedComparisonText(report) {
 
 {
   const report = reportFor([
-    lesionRow('bilateral ribs', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('left 3rd rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('right 4th rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('bilateral ribs', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('left 3rd rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('right 4th rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.match(report.textFindings, /bilateral ribs \(except for right 4th, left 3rd ribs\)/);
@@ -286,8 +357,8 @@ function assertNoMalformedComparisonText(report) {
 
 {
   const report = reportFor([
-    lesionRow('bilateral 3rd ribs', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('left 4th rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('bilateral 3rd ribs', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('left 4th rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.doesNotMatch(report.textFindings, /\(except left 4th rib\)/);
@@ -296,8 +367,8 @@ function assertNoMalformedComparisonText(report) {
 
 {
   const genericParent = reportFor([
-    lesionRow('left 3rd rib', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('anterior aspect of left 3rd rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('left 3rd rib', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('anterior aspect of left 3rd rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.match(genericParent.textFindings, /left 3rd rib \(except for left 3rd rib\)/);
@@ -307,16 +378,16 @@ function assertNoMalformedComparisonText(report) {
   assert.doesNotMatch(genericParent.textImpressions, /except anterior aspect of left 3rd rib/);
 
   const aspectParent = reportFor([
-    lesionRow('anterior aspect of left 3rd rib', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('left 3rd rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('anterior aspect of left 3rd rib', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('left 3rd rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.doesNotMatch(aspectParent.textFindings, /anterior aspect of left 3rd rib \(except left 3rd rib\)/);
   assert.doesNotMatch(aspectParent.textImpressions, /anterior aspect of left 3rd rib \(except left 3rd rib\)/);
 
   const differentAspect = reportFor([
-    lesionRow('anterior aspect of left 3rd rib', '{}, more intense', 'Bone lesion in {}, imaging correlation is recommended.'),
-    lesionRow('posterior aspect of left 3rd rib', '{}, less intense', 'Bone lesion in {}, imaging correlation is recommended.')
+    lesionRow('anterior aspect of left 3rd rib', '{}, more intense', 'Bone lesion in {}. Imaging correlation is recommended.'),
+    lesionRow('posterior aspect of left 3rd rib', '{}, less intense', 'Bone lesion in {}. Imaging correlation is recommended.')
   ]);
 
   assert.doesNotMatch(differentAspect.textFindings, /\(except posterior aspect of left 3rd rib\)/);
