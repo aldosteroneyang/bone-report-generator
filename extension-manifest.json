@@ -49,33 +49,33 @@
     },
     {
       "mciid": "9310409",
-      "name": "Whole Body Bone Scan",
+      "name": "Bone scan with SPECT",
       "areas": [
         {
           "key": "ClinicalHistory",
           "label": "Clinical History",
-          "webnmId": "area_128",
+          "webnmId": "area_163",
           "read": true,
           "write": false
         },
         {
           "key": "Procedure",
           "label": "Procedure",
-          "webnmId": "area_129",
+          "webnmId": "area_164",
           "read": true,
           "write": true
         },
         {
           "key": "Findings",
           "label": "Findings",
-          "webnmId": "area_130",
+          "webnmId": "area_165",
           "read": true,
           "write": true
         },
         {
           "key": "Impression",
           "label": "Impression",
-          "webnmId": "area_131",
+          "webnmId": "area_166",
           "read": true,
           "write": true
         },

@@ -37,10 +37,11 @@ Legacy top-level fields are still included temporarily:
 }
 ```
 
-WEBNM mapping for MCIIDs `9310401` and `9310409`:
+WEBNM mapping for MCIID `9310401`:
 
 ```json
 {
+  "ClinicalHistory": "area_128",
   "Procedure": "area_129",
   "Findings": "area_130",
   "Impression": "area_131",
@@ -48,7 +49,26 @@ WEBNM mapping for MCIIDs `9310401` and `9310409`:
 }
 ```
 
-`area_128` Clinical History is read-only context and is intentionally not overwritten.
+WEBNM mapping for MCIID `9310409` (`Bone scan with SPECT`):
+
+```json
+{
+  "ClinicalHistory": "area_163",
+  "Procedure": "area_164",
+  "Findings": "area_165",
+  "Impression": "area_166",
+  "Keyword": "keyword"
+}
+```
+
+Clinical History is read-only context for both MCIIDs and is intentionally not overwritten. `Keyword` maps to `keyword` for both MCIIDs.
+
+MCIID `9310409` writes the SPECT-specific Procedure text:
+
+```text
+1. A bone scan consisting of whole body and/or spot views is obtained by gamma camera with low energy high resolution collimator 3 hours after the intravenous injection of 20 mCi of Tc-99m MDP.
+2. SPECT technique is also performed for further evaluation.
+```
 
 When opened by `gui-report-extension`, draft state is scoped by `referno` and cached for 5 days through extension-owned `chrome.storage.local`. Standalone localStorage fallback is also scoped instead of using a shared `tableData` key.
 

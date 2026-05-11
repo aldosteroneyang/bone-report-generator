@@ -814,7 +814,8 @@
       X: 8,
       Y: 9
     };
-    const BONE_SCAN_PROCEDURE = 'A bone scan consisting of whole body and/or spot views is obtained by gamma camera with low energy high resolution collimator 3 hours after the intravenous injection of 20 mCi of Tc-99m MDP.';
+    const WHOLE_BODY_BONE_SCAN_PROCEDURE = 'A bone scan consisting of whole body and/or spot views is obtained by gamma camera with low energy high resolution collimator 3 hours after the intravenous injection of 20 mCi of Tc-99m MDP.';
+    const BONE_SCAN_WITH_SPECT_PROCEDURE = `1. ${WHOLE_BODY_BONE_SCAN_PROCEDURE}\n2. SPECT technique is also performed for further evaluation.`;
     const PARSER_MODE = {
       API: 'api',
       RULE_BASED: 'rule-based'
@@ -844,6 +845,16 @@
     const guiExtensionData = readExtensionData();
     window.guiExtensionData = guiExtensionData;
     window.clinicalHistoryContext = getAreaValue(guiExtensionData, 'ClinicalHistory');
+
+    function getCurrentMciid() {
+      return String(guiExtensionData?.mciid || '').trim();
+    }
+
+    function getProcedureText() {
+      return getCurrentMciid() === '9310409'
+        ? BONE_SCAN_WITH_SPECT_PROCEDURE
+        : WHOLE_BODY_BONE_SCAN_PROCEDURE;
+    }
 
     function getAreaValue(data, key) {
       const areaValue = data?.areas?.[key];
@@ -2095,7 +2106,7 @@ Preserve original anatomic aspect details in "lesion" whenever they are present 
 
     function buildReportAreas(report, tableData) {
       return {
-        Procedure: { value: BONE_SCAN_PROCEDURE },
+        Procedure: { value: getProcedureText() },
         Findings: { value: report.textFindings || '' },
         Impression: { value: report.textImpressions || '' },
         Keyword: { value: mergeKeywordValues(getAreaValue(guiExtensionData, 'Keyword'), generateKeyword(tableData)) }
@@ -2392,7 +2403,7 @@ Preserve original anatomic aspect details in "lesion" whenever they are present 
           type: 'GUI_REPORT_RESULT',
           areas,
           generatorState: getGeneratorState(),
-          Procedure: BONE_SCAN_PROCEDURE,
+          Procedure: areas.Procedure.value,
           Findings: areas.Findings.value,
           Impression: areas.Impression.value,
           Keyword: areas.Keyword.value
