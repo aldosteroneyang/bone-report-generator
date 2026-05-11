@@ -37,7 +37,7 @@ Legacy top-level fields are still included temporarily:
 }
 ```
 
-WEBNM mapping for MCIID `9310401`:
+WEBNM mapping for MCIIDs `9310401` and `9310409`:
 
 ```json
 {
